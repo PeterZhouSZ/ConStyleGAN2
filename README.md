@@ -5,7 +5,5 @@ set up environments, use CIPS environment
 
 > pip install tensorboardX
 
-> conda activate CIPS
-
-> pip install -r requirements.txt
+you also need to specify the location of train and val dataset in `config` folder
 
