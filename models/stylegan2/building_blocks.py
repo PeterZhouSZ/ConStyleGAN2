@@ -92,6 +92,7 @@ class EqualConv2d(nn.Module):
         self.weight = nn.Parameter( torch.randn(out_channel, in_channel, kernel_size, kernel_size) )
         self.scale = 1 / math.sqrt(in_channel * kernel_size ** 2)
 
+        self.circular=True
         self.stride = stride
         self.padding = padding
 
@@ -101,8 +102,14 @@ class EqualConv2d(nn.Module):
             self.bias = None
 
     def forward(self, input):
-        out = F.conv2d(input,  self.weight*self.scale, bias=self.bias, stride=self.stride, padding=self.padding)
+        if self.circular:
+            input = F.pad(input, (self.padding,self.padding,self.padding,self.padding), mode ='circular')
+            out = F.conv2d(input, self.weight*self.scale, bias=self.bias, stride=self.stride)
+        else:
+            out = F.conv2d(input, self.weight*self.scale, bias=self.bias, stride=self.stride, padding=self.padding)
         return out
+
+
 
     def __repr__(self):
         return ( f'{self.__class__.__name__}({self.weight.shape[1]}, {self.weight.shape[0]},'
@@ -117,6 +124,7 @@ class EqualConvTranspose2d(nn.Module):
         self.weight = nn.Parameter( torch.randn(in_channel, out_channel, kernel_size, kernel_size) )
         self.scale = 1 / math.sqrt(in_channel * kernel_size ** 2)
 
+        self.circular=True
         self.stride = stride
         self.padding = padding
 
@@ -126,7 +134,11 @@ class EqualConvTranspose2d(nn.Module):
             self.bias = None
 
     def forward(self, input):
-        out = F.conv_transpose2d( input, self.weight*self.scale, bias=self.bias, stride=self.stride, padding=self.padding )
+        if self.circular:
+            input = F.pad(input, (self.padding,self.padding,self.padding,self.padding), mode ='circular')
+            out = F.conv_transpose2d( input, self.weight*self.scale, bias=self.bias, stride=self.stride )
+        else:
+            out = F.conv_transpose2d( input, self.weight*self.scale, bias=self.bias, stride=self.stride, padding=self.padding )
         return out
 
     def __repr__(self):
@@ -178,6 +190,7 @@ class ModulatedConv2d(nn.Module):
     def __init__( self, in_channel, out_channel, kernel_size, style_dim, demodulate=True, upsample=False, downsample=False, blur_kernel=[1,3,3,1] ):
         super().__init__()
 
+        self.circular=True
         self.eps = 1e-8
         self.kernel_size = kernel_size
         self.in_channel = in_channel
@@ -245,7 +258,11 @@ class ModulatedConv2d(nn.Module):
 
         else:
             input = input.view(1, batch * in_channel, height, width)
-            out = F.conv2d(input, weight, padding=self.padding, groups=batch)
+            if self.circular:
+                input = F.pad(input, (self.padding, self.padding, self.padding, self.padding), mode ='circular')
+                out = F.conv2d(input, weight, groups=batch)
+            else:
+                out = F.conv2d(input, weight, padding=self.padding, groups=batch)
             _, _, height, width = out.shape
             out = out.view(batch, self.out_channel, height, width)
 

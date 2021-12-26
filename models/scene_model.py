@@ -9,7 +9,7 @@ from models.stylegan2.building_blocks import PixelNorm, EqualLinear, ConstantInp
 
 
 class Generator(nn.Module):
-    def __init__(self, args, device, blur_kernel=[1, 3, 3, 1], lr_mlp=0.01, final_channel=5 ):
+    def __init__(self, args, device, blur_kernel=[1, 3, 3, 1], lr_mlp=0.01):
         super().__init__()
 
         self.args = args
@@ -29,6 +29,8 @@ class Generator(nn.Module):
                             256: 64 * args.channel_multiplier,
                             512: 32 * args.channel_multiplier,
                             1024: 16 * args.channel_multiplier }
+
+        final_channel = 6 if args.extract_model else 5
 
         self.encoder = Encoder(args)
         
@@ -182,7 +184,7 @@ class Generator(nn.Module):
             assert styles == None
         else:
             assert False, 'not supported input_type'
-        
+
         start_feature, styles, input_type, loss = self.__prepare_starting_feature(global_pri, styles, input_type)
         latent = self.__prepare_letent(styles, inject_index, truncation, truncation_latent, input_type)
         noise = self.__prepare_noise(noise, randomize_noise)
@@ -194,9 +196,14 @@ class Generator(nn.Module):
 
         i = 0
         for conv1, conv2, noise1, noise2, to_rgb in zip( self.convs[::2], self.convs[1::2], noise[::2], noise[1::2], self.to_rgbs ):
+            # print('out: ',out.shape)
             out = conv1(out, latent[:, i], noise=noise1)  
+            # print('out: ',out.shape)
             out = conv2(out, latent[:, i + 1], noise=noise2)   
+            # print('out: ',out.shape)
             skip = to_rgb(out, latent[:, i + 2], skip)
+            # print('skip: ',skip.shape)
+
             i += 2
             
         image = F.tanh(skip)
@@ -275,7 +282,9 @@ class Discriminator(nn.Module):
 
 
         log_size = int( math.log(input_size,2) )
-        convs = [ ConvLayer(5, channels[input_size], 1) ]        
+
+        in_c = 6 if args.extract_model else 5
+        convs = [ ConvLayer(in_c, channels[input_size], 1) ]        
 
         in_channel = channels[input_size]
 
@@ -297,8 +306,9 @@ class Discriminator(nn.Module):
 
         if self.need_handle_size:
             input = self.padder(input)
-
+        # print('input', input.shape)
         out = self.convs(input)
+        # print('out', out.shape)
 
         batch, channel, height, width = out.shape
         group = min(batch, self.stddev_group)
@@ -369,7 +379,8 @@ class Encoder(nn.Module):
                      1024: 16 * args.channel_multiplier }
 
         # self.convs1 = ConvLayer(args.number_of_semantic+1, channels[args.scene_size[0]], 1)  # this 1 is edge map
-        self.convs1 = ConvLayer(1, channels[args.scene_size[0]], 1)  # this 1 is edge map
+        in_c = 1 if not args.extract_model else 3
+        self.convs1 = ConvLayer(in_c, channels[args.scene_size[0]], 1)  # this 1 is edge map
 
         log_size = int(math.log(args.scene_size[0], 2))
 
@@ -389,7 +400,10 @@ class Encoder(nn.Module):
         w_over_h = args.scene_size[1] / args.scene_size[0]
         assert w_over_h.is_integer(), 'non supported scene_size'
 
-        self.final_linear = EqualLinear(channels[4] * 4 * 4 * int(w_over_h), channels[4], activation='fused_lrelu')
+        if args.extract_model:
+            self.final_linear = EqualLinear(channels[4] * 2 * 2 * int(w_over_h), channels[4], activation='fused_lrelu')
+        else:
+            self.final_linear = EqualLinear(channels[4] * 4 * 4 * int(w_over_h), channels[4], activation='fused_lrelu')
         self.mu_linear = EqualLinear(channels[4], args.style_dim)
         self.var_linear = EqualLinear(channels[4], args.style_dim)
 
@@ -407,20 +421,30 @@ class Encoder(nn.Module):
     def forward(self, input):
         batch = input.shape[0]
         intermediate_feature = []
-
+        # print('input: ',input.shape)
         out = self.convs1(input)
+        # print('out: ',out.shape)
         for conv in self.convs2:
             out = conv(out)
+            # print('out: ',out.shape)
             if 4 <= out.shape[2] <= self.args.starting_height_size:
                 intermediate_feature.append( out ) 
         starting_feature = self.unet( intermediate_feature[::-1] )
-     
 
-        out = self.final_linear( out.view(batch, -1)  )
+        out = self.final_linear( out.view(batch, -1))
         mu = self.mu_linear(out)
         logvar = self.var_linear(out)
-        z = self.reparameterize(mu, logvar)
+        # if condition z
+        if not self.args.nocond_z:
+            z = self.reparameterize(mu, logvar)
+            loss = self.get_kl_loss(mu, logvar)
+        # if no condition z
+        else:
+            # print('out: ',out.shape)
+            z = torch.randn(out.shape[0], self.args.style_dim, device='cuda')
+            loss = self.get_kl_loss(mu, logvar)
+            # print('z ',z.shape)
 
-
-        loss = self.get_kl_loss(mu, logvar)
         return starting_feature, z, loss
+
+

@@ -54,7 +54,11 @@ if __name__ == "__main__":
     parser.add_argument("--g_reg_every", type=int, default=4, help='perform path regularization for every how many steps')
     parser.add_argument("--vgg_reg_every", type=int, default=4, help='perform vgg regularization for every how many steps, if 0 then no vgg loss')
     parser.add_argument("--vgg_fix_noise", type=bool, default=True, help='noise will be fixed when perform vgg loss')
-   
+    parser.add_argument('--aug_data', action='store_true', help='data augmentation')        
+    parser.add_argument('--extract_model', action='store_true', help='extract model of tileable patterns from target images')        
+    parser.add_argument('--tile_crop', action='store_true', help='extract model of tileable patterns from target images')        
+    parser.add_argument('--nocond_z', action='store_true', help='randonly sample z from normal distribution')        
+
     args = parser.parse_args()
     
     assert args.augment == False, 'augmentation is never tested. Not sure if it works...'

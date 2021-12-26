@@ -11,13 +11,14 @@ from models.scene_model import Generator, Discriminator
 from dataset.image_dataset import get_scene_dataloader
 from misc.DiffAugment import DiffAugment
 
-from trainer.utils import sample_data, ImageSaver, accumulate, sample_n_data, to_device, CheckpointSaver
+from trainer.utils import sample_data, ImageSaver, accumulate, sample_n_data, to_device, CheckpointSaver, mycrop
 from criteria.gan import g_nonsaturating_loss, d_logistic_loss, g_path_regularize, d_r1_loss
 from criteria.vgg import VGGLoss
 from distributed import get_rank, synchronize, reduce_loss_dict, reduce_sum, get_world_size     
 import time
 
 from trainer.render import render, set_param, getTexPos, height_to_normal
+import random
 
 def get_edges(t):
     ByteTensor = torch.cuda.ByteTensor
@@ -82,6 +83,7 @@ class Trainer():
             self.image_train_saver = ImageSaver(os.path.join('output',self.args.name,'sample_train'), int(self.args.n_sample**0.5) )
             self.image_test_saver = ImageSaver(os.path.join('output',self.args.name,'sample_test'), int(self.args.n_sample**0.5) )
             self.ckpt_saver = CheckpointSaver( args, os.path.join('output',self.args.name,'checkpoint')  ) 
+            self.ckpt_saver_eval = CheckpointSaver( args, os.path.join('output',self.args.name,'checkpoint_eval')  ) 
             self.writer = SummaryWriter( os.path.join('output',self.args.name,'Log') )   
             self.prepare_visualization_data()       
 
@@ -95,6 +97,7 @@ class Trainer():
             shutil.rmtree(path)
         os.makedirs(path)
         os.makedirs(path+'/checkpoint' )
+        os.makedirs(path+'/checkpoint_eval' )
         os.makedirs(path+'/sample_train' )
         os.makedirs(path+'/sample_test' )
         os.makedirs(path+'/Log' )    
@@ -137,7 +140,7 @@ class Trainer():
 
 
     def prepare_dataloader(self):
-        print('prepare dataloader..................')
+        # print('prepare dataloader..................')
         self.train_loader = sample_data( self.args, get_scene_dataloader(self.args, train=True)   )
         self.test_loader = sample_data( self.args,  get_scene_dataloader( self.args, train=False)  )
 
@@ -184,8 +187,10 @@ class Trainer():
                          "optimizerG": self.optimizerG.state_dict(),
                          "optimizerD": self.optimizerD.state_dict(),
                          "iters": count }
-
         self.ckpt_saver( save_dict, count )
+
+        save_dict =  {"g_ema": self.g_ema.state_dict()}
+        self.ckpt_saver_eval( save_dict, count )
 
 
 
@@ -260,15 +265,21 @@ class Trainer():
         return (x-mean)/std
 
 
-    def regularizeVGG(self, count):
+    def regularizeVGG(self, count, rand0=None, nocrop_real=None):
         randomize_noise = not self.args.vgg_fix_noise
         output = self.generator(self.data['global_pri'], return_loss=False, randomize_noise=randomize_noise)
         fake_img = output['image']
 
+        if self.args.tile_crop:
+            fake_crop = mycrop(fake_img, fake_img.shape[-1], rand0=rand0)
+        else:
+            fake_crop = fake_img
+        real_crop = self.data['real_img']
+
         # rerender if necessary
-        if fake_img.shape[1]!=3:
-            fake_fea_vgg = fake_img*0.5+0.5
-            real_fea_vgg = self.data['real_img']*0.5+0.5
+        if fake_img.shape[1] == 5 or fake_img.shape[1] == 6:
+            fake_fea_vgg = fake_crop*0.5+0.5
+            real_fea_vgg = real_crop*0.5+0.5
 
             light, light_pos, size = set_param('cuda')
 
@@ -283,13 +294,22 @@ class Trainer():
             real_rens = render(real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
 
             if get_rank()==0 and count%100==0:
+
+                if nocrop_real is not None:
+                    nocrop_real_fea = nocrop_real*0.5+0.5
+                    nocrop_real_N = height_to_normal(nocrop_real_fea[:,0:1,:,:])
+                    nocrop_real_fea = torch.cat((2*nocrop_real_N-1,nocrop_real_fea[:,1:4,:,:],nocrop_real_fea[:,4:5,:,:].repeat(1,3,1,1)),dim=1)
+                    # tex_pos = getTexPos(ren_fea.shape[2], size, 'cuda').unsqueeze(0)
+                    nocrop_real_rens = render(nocrop_real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
+
+                self.image_train_saver( self.data['global_pri'], f'{count}pats.png' )   
                 self.image_train_saver( 2*fake_rens-1, f'{count}fake_rens.png' )   
                 self.image_train_saver( 2*real_rens-1, f'{count}real_rens.png' )   
+                self.image_train_saver( 2*nocrop_real_rens-1, f'{count}real_rens_nocrop.png' )   
 
             vgg_loss = self.get_vgg_loss(self.preVGG(fake_rens), self.preVGG(real_rens)) * self.args.vgg_reg_every * self.args.vgg_regularize
-            # vgg_loss = self.get_vgg_loss(self.preVGG(fake_fea_vgg[:,1:4,:,:]), self.preVGG(real_fea_vgg[:,1:4,:,:])) * self.args.vgg_reg_every * self.args.vgg_regularize
 
-        else:
+        elif fake_img.shape[1] == 3:
             vgg_loss = self.get_vgg_loss(fake_img, self.data['real_img']) * self.args.vgg_reg_every * self.args.vgg_regularize
 
         self.loss_dict['vgg_loss'] = vgg_loss.item()
@@ -328,6 +348,16 @@ class Trainer():
             self.kl_loss = output['klloss']*self.args.kl_lambda
             self.loss_dict['kl'] = self.kl_loss.item()
 
+            # crop if need
+            nocrop_real = self.data['real_img']
+
+            if self.args.tile_crop:
+                rand0 = [random.randint(-self.args.scene_size[0]+1, self.fake_img.shape[-1]-1),random.randint(-self.args.scene_size[0]+1, self.fake_img.shape[-1]-1)]
+                self.fake_img = mycrop(self.fake_img, self.fake_img.shape[-1], rand0=rand0)
+                self.data['real_img'] = mycrop(self.data['real_img'], self.fake_img.shape[-1], rand0=rand0)
+            else:
+                rand0=None
+
             # update D
             self.trainD()
             if count % self.args.d_reg_every == 0:
@@ -338,7 +368,7 @@ class Trainer():
             if count % self.args.g_reg_every == 0:
                 self.regularizePath()
             if self.args.vgg_reg_every != 0 and count % self.args.vgg_reg_every == 0:
-                self.regularizeVGG(count)
+                self.regularizeVGG(count, rand0, nocrop_real=nocrop_real)
 
             accum = 0.5 ** (32 / (10 * 1000))
             accumulate(self.g_ema, self.g_module, accum)

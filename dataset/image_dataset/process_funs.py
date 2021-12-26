@@ -6,6 +6,10 @@ from torchvision import transforms
 
 import random
 
+from trainer.render import render, set_param, getTexPos, height_to_normal
+
+from trainer.utils import mycrop
+
 # def get_foreground_data(args, img, sem, ins, parsing):    
 #     output = []    
 #     order = parsing['order']
@@ -36,37 +40,60 @@ import random
 
 
 
-def get_scene_data(img, composition=None):
+
+def get_scene_data(args, img, composition=None):
     """
     This function is used by both background_dataset and refiner_dataset
 
     composition is also PIL.Image, but it is a generated image
     """
-    full_img = TF.to_tensor(img) #[0,1]
+    full_img = TF.to_tensor(img).cuda() #[0,1]
     c,h,w = full_img.shape
 
-    # print('full img', full_img.shape)
     # data augmentation
-    # color_jitter = transforms.Compose([transforms.ToPILImage(), transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.5, hue=0.5), transforms.ToTensor()])
-    # D = color_jitter(full_img[:,:,h:2*h])
-    # gamma = 0.8+random.random()*0.4 # [0.8~1.2]
-    # H = full_img[0:1,:,0:h]**gamma
-    # R = full_img[0:1,:,2*h:3*h]**gamma
+    if args.aug_data:
+        color_jitter = transforms.Compose([transforms.ToPILImage(), transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.5, hue=0.5), transforms.ToTensor()])
+        D = color_jitter(full_img[:,:,h:2*h])
+        gamma = 0.8+random.random()*0.4 # [0.8~1.2]
+        H = full_img[0:1,:,0:h]**gamma
+        R = full_img[0:1,:,2*h:3*h]**gamma
+        scene_img = torch.cat([H, D, R], dim=0)
+    else:
+        H = full_img[0:1,:,0:h]
+        D = full_img[:,:,h:2*h]
+        R = full_img[0:1,:,2*h:3*h]
+        scene_img = torch.cat([H, D, R], dim=0)
 
     # extract conditional mask
-    # scene_img = torch.cat([H, D, R], dim=0)
-    scene_img = torch.cat([full_img[0:1,:,0:h], full_img[:,:,h:2*h], full_img[0:1,:,2*h:3*h]], dim=0)
-    scene_sem = full_img[0:1,:,3*h:4*h]
-
-    # scene_sem = torch.tensor( np.array(sem) ).unsqueeze(0).long()
-    # scene_ins = torch.tensor( np.array(ins) ).unsqueeze(0).long()
-    
-    # if composition != None:
-    #     composition = ( TF.to_tensor(composition) - 0.5 ) / 0.5 
-
     out = {}
+
+    if args.extract_model:
+
+        # rendered image as semantic image
+        light, light_pos, size = set_param('cuda')
+        real_N = height_to_normal(H.unsqueeze(0))
+        real_fea = torch.cat((2*real_N-1, D.unsqueeze(0), R.unsqueeze(0).repeat(1,3,1,1)), dim=1)
+        tex_pos = getTexPos(real_fea.shape[2], size, 'cuda').unsqueeze(0)
+        real_rens = render(real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
+        # print('real_rens: ',real_rens.shape)
+
+        # center crop 256 of 512
+        scene_sem = mycrop(real_rens, 256, center=True)
+        if scene_sem.dim()==4:
+            scene_sem = scene_sem[0,...]
+        # print('scene_sem: ',scene_sem.shape)
+        out['scene_sem'] = 2*scene_sem-1
+
+        # real image include H,D,R,Pat
+        scene_img = torch.cat([scene_img, full_img[0:1,:,3*h:4*h]], dim=0)
+
+    else:
+        scene_sem = full_img[0:1,:,3*h:4*h]
+        out['scene_sem'] = 2*scene_sem-1
+
     out['scene_img'] = 2*scene_img-1
-    out['scene_sem'] = 2*scene_sem-1
+
+    # out[]
     # out['scene_ins'] = scene_ins
     # if composition != None:
     #     out['composition'] = composition

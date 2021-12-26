@@ -19,7 +19,7 @@ class Dataset(torch.utils.data.Dataset):
         "datasets is given when do composition otherwise you also need to specify SceneConfig when do compositon"
         self.args = args 
         self.train = train 
-        
+        print('data augmentation is ', args.aug_data)
             
         # prepare datasourcer  
         if datasets is None:
@@ -92,7 +92,7 @@ class Dataset(torch.utils.data.Dataset):
         # read raw images 
         img = Image.open( self.sourcer.img_bank[idx] ).convert('RGB')
         
-        out = get_scene_data(img)
+        out = get_scene_data(self.args, img)
 
         return out
  
