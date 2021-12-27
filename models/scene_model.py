@@ -32,7 +32,7 @@ class Generator(nn.Module):
 
         final_channel = 6 if args.extract_model else 5
 
-        self.encoder = Encoder(args)
+        self.encoder = Encoder(args, device=self.device)
         
         self.w_over_h = args.scene_size[1] / args.scene_size[0]
         assert self.w_over_h.is_integer(), 'non supported scene_size'
@@ -364,10 +364,11 @@ class SmallUnet(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, args, blur_kernel=[1, 3, 3, 1]):
+    def __init__(self, args, device ,blur_kernel=[1, 3, 3, 1]):
         super().__init__()
         self.args = args
 
+        self.device = device
         channels = { 4: 512,
                      8: 512,
                      16: 512,
@@ -400,12 +401,13 @@ class Encoder(nn.Module):
         w_over_h = args.scene_size[1] / args.scene_size[0]
         assert w_over_h.is_integer(), 'non supported scene_size'
 
-        if args.extract_model:
-            self.final_linear = EqualLinear(channels[4] * 2 * 2 * int(w_over_h), channels[4], activation='fused_lrelu')
-        else:
-            self.final_linear = EqualLinear(channels[4] * 4 * 4 * int(w_over_h), channels[4], activation='fused_lrelu')
-        self.mu_linear = EqualLinear(channels[4], args.style_dim)
-        self.var_linear = EqualLinear(channels[4], args.style_dim)
+        if not args.nocond_z:
+            if args.extract_model:
+                self.final_linear = EqualLinear(channels[4] * 2 * 2 * int(w_over_h), channels[4], activation='fused_lrelu')
+            else:
+                self.final_linear = EqualLinear(channels[4] * 4 * 4 * int(w_over_h), channels[4], activation='fused_lrelu')
+            self.mu_linear = EqualLinear(channels[4], args.style_dim)
+            self.var_linear = EqualLinear(channels[4], args.style_dim)
 
 
     def reparameterize(self, mu, logvar):
@@ -431,18 +433,21 @@ class Encoder(nn.Module):
                 intermediate_feature.append( out ) 
         starting_feature = self.unet( intermediate_feature[::-1] )
 
-        out = self.final_linear( out.view(batch, -1))
-        mu = self.mu_linear(out)
-        logvar = self.var_linear(out)
+
         # if condition z
         if not self.args.nocond_z:
+            out = self.final_linear( out.view(batch, -1))
+            mu = self.mu_linear(out)
+            logvar = self.var_linear(out)
+
             z = self.reparameterize(mu, logvar)
             loss = self.get_kl_loss(mu, logvar)
         # if no condition z
         else:
-            # print('out: ',out.shape)
-            z = torch.randn(out.shape[0], self.args.style_dim, device='cuda')
-            loss = self.get_kl_loss(mu, logvar)
+            # print('out: ',out.shape[0], self.args.style_dim)
+            z = torch.randn(out.shape[0], self.args.style_dim, device=self.device)
+            # loss = self.get_kl_loss(z, z)*0.0 # no 
+            loss = torch.tensor([0.0], requires_grad=True, device=self.device)
             # print('z ',z.shape)
 
         return starting_feature, z, loss
