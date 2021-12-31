@@ -384,8 +384,8 @@ class Trainer():
             self.trainG()
             if count % self.args.g_reg_every == 0:
                 self.regularizePath()
-            # if self.args.vgg_reg_every != 0 and count % self.args.vgg_reg_every == 0:
-            #     self.regularizeVGG(count, rand0, nocrop_real=nocrop_real)
+            if self.args.vgg_reg_every != 0 and count % self.args.vgg_reg_every == 0 and self.args.vgg_regularize!=0:
+                self.regularizeVGG(count, rand0, nocrop_real=nocrop_real)
 
             accum = 0.5 ** (32 / (10 * 1000))
             accumulate(self.g_ema, self.g_module, accum)

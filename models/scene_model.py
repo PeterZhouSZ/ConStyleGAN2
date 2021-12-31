@@ -189,6 +189,7 @@ class Generator(nn.Module):
         latent = self.__prepare_letent(styles, inject_index, truncation, truncation_latent, input_type)
         noise = self.__prepare_noise(noise, randomize_noise)
     
+        # print('noise ', noise)
         # # # start generating # # #  
 
         out = start_feature
@@ -285,7 +286,7 @@ class Discriminator(nn.Module):
 
         if args.cond_D:
             in_c += 1
-            
+
         convs = [ ConvLayer(in_c, channels[input_size], 1) ]        
 
         in_channel = channels[input_size]
