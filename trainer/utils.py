@@ -9,6 +9,7 @@ import PIL
 import numpy as np
 from PIL import Image 
 
+import random
 
 # self-defined crop function
 def mycrop(x, size, center=False, rand0=None, tileable=True):

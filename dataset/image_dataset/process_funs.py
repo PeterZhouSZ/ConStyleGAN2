@@ -53,11 +53,18 @@ def get_scene_data(args, img, composition=None):
     # data augmentation
     if args.aug_data:
         color_jitter = transforms.Compose([transforms.ToPILImage(), transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.5, hue=0.5), transforms.ToTensor()])
-        D = color_jitter(full_img[:,:,h:2*h])
+        D = color_jitter(full_img[:,:,h:2*h]).cuda()
         gamma = 0.8+random.random()*0.4 # [0.8~1.2]
         H = full_img[0:1,:,0:h]**gamma
         R = full_img[0:1,:,2*h:3*h]**gamma
+
         scene_img = torch.cat([H, D, R], dim=0)
+
+        # randomly crop
+        # print('before: ',scene_img.shape)
+        scene_img = mycrop(scene_img.unsqueeze(0), H.shape[-1]).squeeze(0)
+        # print('after: ',scene_img.shape)
+
     else:
         H = full_img[0:1,:,0:h]
         D = full_img[:,:,h:2*h]

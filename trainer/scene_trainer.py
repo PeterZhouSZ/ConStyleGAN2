@@ -116,6 +116,7 @@ class Trainer():
         self.g_ema.eval()
         accumulate(self.g_ema, self.generator, 0)
 
+        # print(self.generator)
 
     def prepare_optimizer(self):
         g_reg_ratio = self.args.g_reg_every / (self.args.g_reg_every + 1)    
@@ -203,6 +204,12 @@ class Trainer():
             augmented_real_img = self.data['real_img']
             augmented_fake_img = self.fake_img.detach()
 
+        if self.args.cond_D:
+            augmented_fake_img = torch.cat([augmented_fake_img, self.cond_D], dim=1)
+            augmented_real_img = torch.cat([augmented_real_img, self.cond_D], dim=1)
+            # print(self.cond_D.shape)
+            # print(augmented_real_img.shape)
+
         real_pred = self.netD(augmented_real_img)
         fake_pred = self.netD(augmented_fake_img)        
         d_loss = d_logistic_loss(real_pred, fake_pred)  
@@ -220,6 +227,9 @@ class Trainer():
         else:
             augmented_fake_img = self.fake_img
 
+        if self.args.cond_D:
+            augmented_fake_img = torch.cat([augmented_fake_img, self.cond_D], dim=1)
+
         fake_pred = self.netD(augmented_fake_img)
         g_loss = g_nonsaturating_loss(fake_pred)
         self.loss_dict["g"] = g_loss.item()
@@ -234,7 +244,10 @@ class Trainer():
     def regularizeD(self):
        
         self.data['real_img'].requires_grad = True
-        real_pred = self.netD(self.data['real_img'])
+
+        in_D = torch.cat([self.data['real_img'], self.cond_D], dim=1) if self.args.cond_D else self.data['real_img']
+
+        real_pred = self.netD(in_D)
 
         r1_loss = d_r1_loss(real_pred, self.data['real_img'])
         r1_loss = self.args.r1 / 2 * r1_loss * self.args.d_reg_every + 0 * real_pred[0]
@@ -355,6 +368,10 @@ class Trainer():
                 rand0 = [random.randint(-self.args.scene_size[0]+1, self.fake_img.shape[-1]-1),random.randint(-self.args.scene_size[0]+1, self.fake_img.shape[-1]-1)]
                 self.fake_img = mycrop(self.fake_img, self.fake_img.shape[-1], rand0=rand0)
                 self.data['real_img'] = mycrop(self.data['real_img'], self.fake_img.shape[-1], rand0=rand0)
+
+                if self.args.cond_D:
+                    self.cond_D = mycrop(self.data['global_pri'], self.fake_img.shape[-1], rand0=rand0)
+
             else:
                 rand0=None
 
@@ -367,8 +384,8 @@ class Trainer():
             self.trainG()
             if count % self.args.g_reg_every == 0:
                 self.regularizePath()
-            if self.args.vgg_reg_every != 0 and count % self.args.vgg_reg_every == 0:
-                self.regularizeVGG(count, rand0, nocrop_real=nocrop_real)
+            # if self.args.vgg_reg_every != 0 and count % self.args.vgg_reg_every == 0:
+            #     self.regularizeVGG(count, rand0, nocrop_real=nocrop_real)
 
             accum = 0.5 ** (32 / (10 * 1000))
             accumulate(self.g_ema, self.g_module, accum)

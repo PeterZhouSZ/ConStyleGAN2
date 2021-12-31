@@ -254,8 +254,6 @@ class Padder():
         xx = torch.split(x, self.size, self.dim)
         return torch.cat( [xx[0], xx[1]], dim=0 )
             
-
-
 class Discriminator(nn.Module):
     def __init__(self, args, blur_kernel=[1, 3, 3, 1]):
         super().__init__()
@@ -284,6 +282,10 @@ class Discriminator(nn.Module):
         log_size = int( math.log(input_size,2) )
 
         in_c = 6 if args.extract_model else 5
+
+        if args.cond_D:
+            in_c += 1
+            
         convs = [ ConvLayer(in_c, channels[input_size], 1) ]        
 
         in_channel = channels[input_size]
@@ -325,12 +327,6 @@ class Discriminator(nn.Module):
 
         return out
 
-
-
-
-
-
-
 class SmallUnet(nn.Module):
     "Here we aggregate feature from different resolution. It is actually an up branch of Unet"
     def __init__(self, size_to_channel):
@@ -357,10 +353,6 @@ class SmallUnet(nn.Module):
             previos = conv(feature)
             
         return previos
-
-
-
-
 
 
 class Encoder(nn.Module):

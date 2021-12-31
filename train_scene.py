@@ -58,6 +58,7 @@ if __name__ == "__main__":
     parser.add_argument('--extract_model', action='store_true', help='extract model of tileable patterns from target images')        
     parser.add_argument('--tile_crop', action='store_true', help='extract model of tileable patterns from target images')        
     parser.add_argument('--nocond_z', action='store_true', help='randonly sample z from normal distribution')        
+    parser.add_argument('--cond_D', action='store_true', help='conditional to z')        
 
     args = parser.parse_args()
     
