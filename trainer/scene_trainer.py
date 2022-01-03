@@ -174,6 +174,7 @@ class Trainer():
             output = self.g_ema( self.train_sample['global_pri'] )    
             self.image_train_saver( self.train_sample['global_pri'] , str(count).zfill(6)+'_pat.png' )
             self.image_train_saver( output['image'] , str(count).zfill(6)+'.png' )
+            self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_tile.png' ) # save tiled image
             output = self.g_ema( self.test_sample['global_pri'] )     
             self.image_test_saver( self.test_sample['global_pri'] , str(count).zfill(6)+'_pat.png' ) 
             self.image_test_saver( output['image'] , str(count).zfill(6)+'.png' ) 

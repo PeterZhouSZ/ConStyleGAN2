@@ -47,6 +47,24 @@ class Upsample(nn.Module):
 
         return out
 
+# this is ciruclar upsampling
+class CircularUpsample(nn.Module):
+    def __init__(self, scale_factor=2):
+        super().__init__()
+        self.factor=scale_factor
+
+    def forward(self, input):
+
+        _,_,h,w=input.shape
+
+        t = torch.cat([input,input[:,:,:,0:1]],dim=-1)
+        t = torch.cat([t,torch.cat([input[:,:,0:1,:],input[:,:,0:1,0:1]], dim=-1)],dim=-2)
+
+        m = nn.Upsample(size=(self.factor*h+1,self.factor*w+1), mode='bilinear', align_corners=True)
+        out = m(t)[:,:,:self.factor*h, :self.factor*w]
+
+        return out
+
 
 class Downsample(nn.Module):
     def __init__(self, kernel, factor=2):
@@ -81,18 +99,22 @@ class Blur(nn.Module):
         self.pad = pad
 
     def forward(self, input):
+        # print('blur: input ', input.shape)
+        # print('pad ', self.pad)
         out = upfirdn2d(input, self.kernel, pad=self.pad)
+        # print('blur: out ', out.shape)
         return out
 
 
 class EqualConv2d(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size, stride=1, padding=0, bias=True):
+    def __init__(self, in_channel, out_channel, kernel_size, stride=1, padding=0, bias=True, circular=False, downsample=False):
         super().__init__()
 
         self.weight = nn.Parameter( torch.randn(out_channel, in_channel, kernel_size, kernel_size) )
         self.scale = 1 / math.sqrt(in_channel * kernel_size ** 2)
 
-        self.circular=True
+        self.circular = circular
+        self.downsample = downsample
         self.stride = stride
         self.padding = padding
 
@@ -118,15 +140,19 @@ class EqualConv2d(nn.Module):
 
 
 class EqualConvTranspose2d(nn.Module):
-    def __init__( self, in_channel, out_channel, kernel_size, stride=1, padding=0, bias=True ):
+    def __init__( self, in_channel, out_channel, kernel_size, stride=1, padding=0, bias=True, circular=False ):
         super().__init__()
 
-        self.weight = nn.Parameter( torch.randn(in_channel, out_channel, kernel_size, kernel_size) )
+        if circular:
+            self.weight = nn.Parameter( torch.randn(out_channel, in_channel, kernel_size, kernel_size) )
+        else:
+            self.weight = nn.Parameter( torch.randn(in_channel, out_channel, kernel_size, kernel_size) )
         self.scale = 1 / math.sqrt(in_channel * kernel_size ** 2)
 
-        self.circular=True
+        self.circular=circular
         self.stride = stride
         self.padding = padding
+        self.up = CircularUpsample(scale_factor=2)
 
         if bias:
             self.bias = nn.Parameter(torch.zeros(out_channel))
@@ -135,8 +161,14 @@ class EqualConvTranspose2d(nn.Module):
 
     def forward(self, input):
         if self.circular:
-            input = F.pad(input, (self.padding,self.padding,self.padding,self.padding), mode ='circular')
-            out = F.conv_transpose2d( input, self.weight*self.scale, bias=self.bias, stride=self.stride )
+            # self.weight = self.weight.permute(1,0,2,3)
+            # print('input ', input.shape)
+            up_in = self.up(input)
+            # print('up_in ', up_in.shape)
+            # print('self.weight ', self.weight.shape)
+
+            input = F.pad(up_in, (self.padding,self.padding,self.padding,self.padding), mode ='circular')
+            out = F.conv2d( input, self.weight*self.scale, bias=self.bias )
         else:
             out = F.conv_transpose2d( input, self.weight*self.scale, bias=self.bias, stride=self.stride, padding=self.padding )
         return out
@@ -187,10 +219,10 @@ class ScaledLeakyReLU(nn.Module):
 
 
 class ModulatedConv2d(nn.Module):
-    def __init__( self, in_channel, out_channel, kernel_size, style_dim, demodulate=True, upsample=False, downsample=False, blur_kernel=[1,3,3,1] ):
+    def __init__( self, in_channel, out_channel, kernel_size, style_dim, demodulate=True, upsample=False, downsample=False, blur_kernel=[1,3,3,1], circular=False ):
         super().__init__()
 
-        self.circular=True
+        self.circular=circular
         self.eps = 1e-8
         self.kernel_size = kernel_size
         self.in_channel = in_channel
@@ -220,6 +252,8 @@ class ModulatedConv2d(nn.Module):
         self.modulation = EqualLinear(style_dim, in_channel, bias_init=1)
         self.demodulate = demodulate
 
+        self.up = CircularUpsample(scale_factor=2)
+
     def __repr__(self):
         "For print"
         return ( f'{self.__class__.__name__}({self.in_channel}, {self.out_channel}, {self.kernel_size}, '
@@ -240,15 +274,36 @@ class ModulatedConv2d(nn.Module):
         weight = weight.view( batch * self.out_channel, in_channel, self.kernel_size, self.kernel_size )
 
         if self.upsample:
+            # print('.............upsample....................')
             input = input.view(1, batch * in_channel, height, width)
+
             weight = weight.view( batch, self.out_channel, in_channel, self.kernel_size, self.kernel_size )
-            weight = weight.transpose(1, 2).reshape( batch * in_channel, self.out_channel, self.kernel_size, self.kernel_size )
-            out = F.conv_transpose2d(input, weight, padding=0, stride=2, groups=batch)
+
+            if self.circular:
+                weight = weight.reshape( batch * self.out_channel, in_channel, self.kernel_size, self.kernel_size )
+                # print('input1: ',input.shape)
+                input = F.pad(self.up(input), (self.padding, self.padding, self.padding, self.padding), mode ='circular')
+                # print('input2: ',input.shape)
+                # print('weight: ',weight.shape)
+                out = F.conv2d(input, weight, groups=batch)
+                # print('out: ',out.shape)
+            else:
+                weight = weight.transpose(1, 2).reshape( batch * in_channel, self.out_channel, self.kernel_size, self.kernel_size )
+                # print('input: ',input.shape)
+                # print('weight: ',weight.shape)
+
+                out = F.conv_transpose2d(input, weight, padding=0, stride=2, groups=batch)
+                # print('out: ',out.shape)
+
             _, _, height, width = out.shape
             out = out.view(batch, self.out_channel, height, width)
-            out = self.blur(out)
+            if not self.circular:
+                # print('before blur ', out.shape)
+                out = self.blur(out)
+            # print('after blur ', out.shape)
 
         elif self.downsample:
+            # print('..................downsample......................')
             input = self.blur(input)
             _, _, height, width = input.shape
             input = input.view(1, batch * in_channel, height, width)
@@ -296,10 +351,10 @@ class ConstantInput(nn.Module):
 
 
 class StyledConv(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size, style_dim, upsample=False, blur_kernel=[1, 3, 3, 1], demodulate=True ):
+    def __init__(self, in_channel, out_channel, kernel_size, style_dim, upsample=False, blur_kernel=[1, 3, 3, 1], demodulate=True, circular=False ):
         super().__init__()
 
-        self.conv = ModulatedConv2d(in_channel, out_channel, kernel_size, style_dim, upsample=upsample, blur_kernel=blur_kernel, demodulate=demodulate)
+        self.conv = ModulatedConv2d(in_channel, out_channel, kernel_size, style_dim, upsample=upsample, blur_kernel=blur_kernel, demodulate=demodulate, circular=circular)
         self.noise = NoiseInjection()
         # self.bias = nn.Parameter(torch.zeros(1, out_channel, 1, 1))
         # self.activate = ScaledLeakyReLU(0.2)
@@ -315,13 +370,16 @@ class StyledConv(nn.Module):
 
 
 class ToRGB(nn.Module):
-    def __init__(self, in_channel, style_dim, out_channel=3, upsample=True, blur_kernel=[1, 3, 3, 1]):
+    def __init__(self, in_channel, style_dim, out_channel=3, upsample=True, blur_kernel=[1, 3, 3, 1], circular=False):
         super().__init__()
 
         if upsample:
-            self.upsample = Upsample(blur_kernel)
+            if circular:
+                self.upsample = CircularUpsample(scale_factor=2)
+            else:
+                self.upsample = Upsample(blur_kernel)
 
-        self.conv = ModulatedConv2d(in_channel, out_channel, 1, style_dim, demodulate=False)
+        self.conv = ModulatedConv2d(in_channel, out_channel, 1, style_dim, demodulate=False, circular=circular)
         self.bias = nn.Parameter(torch.zeros(1, out_channel, 1, 1))
 
     def forward(self, input, style, skip=None):
@@ -374,26 +432,37 @@ class ToRGB(nn.Module):
 
 
 class ConvLayer(nn.Sequential):
-    def __init__( self, in_channel, out_channel, kernel_size, upsample=False, downsample=False, blur_kernel=(1,3,3,1), bias=True, activate=True, padding="zero"):
+    def __init__( self, in_channel, out_channel, kernel_size, upsample=False, downsample=False, blur_kernel=(1,3,3,1), bias=True, activate=True, padding="zero", circular=False):
         layers = []
         self.padding = 0
         stride = 1
 
         if downsample:
-            factor = 2
-            p = (len(blur_kernel) - factor) + (kernel_size - 1)
-            pad0 = (p + 1) // 2
-            pad1 = p // 2
-            layers.append(Blur(blur_kernel, pad=(pad0, pad1)))
-            stride = 2
+            if not circular:
+                factor = 2
+                p = (len(blur_kernel) - factor) + (kernel_size - 1)
+                pad0 = (p + 1) // 2
+                pad1 = p // 2
+                layers.append(Blur(blur_kernel, pad=(pad0, pad1)))
+                stride = 2
+                # print('downsample padding: ', pad0, pad1)
+            else:
+                self.padding = kernel_size // 2
+                stride = 2
+                # print('downsample padding: ', self.padding)
+
 
         if upsample:
-            layers.append( EqualConvTranspose2d( in_channel, out_channel, kernel_size, padding=0, stride=2, bias=bias and not activate) )
-            factor = 2
-            p = (len(blur_kernel) - factor) - (kernel_size - 1)
-            pad0 = (p + 1) // 2 + factor - 1
-            pad1 = p // 2 + 1
-            layers.append(Blur(blur_kernel, pad=(pad0, pad1)))
+            if not circular:
+                layers.append( EqualConvTranspose2d( in_channel, out_channel, kernel_size, padding=0, stride=2, bias=bias and not activate, circular=circular) )
+                factor = 2
+                p = (len(blur_kernel) - factor) - (kernel_size - 1)
+                pad0 = (p + 1) // 2 + factor - 1
+                pad1 = p // 2 + 1
+                layers.append(Blur(blur_kernel, pad=(pad0, pad1)))
+            else:
+                layers.append( EqualConvTranspose2d( in_channel, out_channel, kernel_size, padding=kernel_size // 2, stride=2, bias=bias and not activate, circular=circular) )
+
 
         else:
             if not downsample:
@@ -406,8 +475,8 @@ class ConvLayer(nn.Sequential):
                     self.padding = 0
                 elif padding != "valid":
                     raise ValueError('Padding should be "zero", "reflect", or "valid"')
-
-            layers.append( EqualConv2d( in_channel, out_channel, kernel_size, padding=self.padding, stride=stride, bias=bias and not activate ) )
+            
+            layers.append( EqualConv2d( in_channel, out_channel, kernel_size, padding=self.padding, stride=stride, bias=bias and not activate, circular=circular, downsample=downsample ) )
 
         if activate:
             if bias:
@@ -423,18 +492,26 @@ class ConvLayer(nn.Sequential):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channel, out_channel, blur_kernel=[1, 3, 3, 1]):
+    def __init__(self, in_channel, out_channel, blur_kernel=[1, 3, 3, 1], circular=False):
         super().__init__()
-
-        self.conv1 = ConvLayer(in_channel, in_channel, 3)
-        self.conv2 = ConvLayer(in_channel, out_channel, 3, downsample=True)
-        self.skip = ConvLayer( in_channel, out_channel, 1, downsample=True, activate=False, bias=False )
+        # print('conv1')
+        self.conv1 = ConvLayer(in_channel, in_channel, 3, circular=circular)
+        # print('conv2')
+        self.conv2 = ConvLayer(in_channel, out_channel, 3, downsample=True, circular=circular)
+        # print('skip')
+        self.skip = ConvLayer( in_channel, out_channel, 1, downsample=True, activate=False, bias=False, circular=circular)
 
     def forward(self, input):
+        # print('ResBlock input', input.shape)
         out = self.conv1(input)
-        out = self.conv2(out)
-        skip = self.skip(input)
-        out = (out + skip) / math.sqrt(2)
+        # print('ResBlock out1', out.shape)
 
+        out = self.conv2(out)
+        # print('ResBlock out2', out.shape)
+
+        skip = self.skip(input)
+        # print('ResBlock skip', skip.shape)
+        out = (out + skip) / math.sqrt(2)
+        # print('ResBlock out3', out.shape)
         return out
 

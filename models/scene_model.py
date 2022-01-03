@@ -259,6 +259,7 @@ class Discriminator(nn.Module):
     def __init__(self, args, blur_kernel=[1, 3, 3, 1]):
         super().__init__()
 
+        self.args=args
         channels = {
             4: 512,
             8: 512,
@@ -293,7 +294,7 @@ class Discriminator(nn.Module):
 
         for i in range(log_size, 2, -1):
             out_channel = channels[2 ** (i - 1)]
-            convs.append(ResBlock(in_channel, out_channel, blur_kernel))
+            convs.append(ResBlock(in_channel, out_channel, blur_kernel, circular=self.args.circular))
             in_channel = out_channel
 
         self.convs = nn.Sequential(*convs)
@@ -301,7 +302,7 @@ class Discriminator(nn.Module):
         self.stddev_group = 4
         self.stddev_feat = 1
 
-        self.final_conv = ConvLayer(in_channel + 1, channels[4], 3)
+        self.final_conv = ConvLayer(in_channel + 1, channels[4], 3, circular=self.args.circular)
         self.final_linear = nn.Sequential( EqualLinear(channels[4] * 4 * 4, channels[4], activation='fused_lrelu'),
                                            EqualLinear(channels[4], 1) )
 
@@ -330,7 +331,7 @@ class Discriminator(nn.Module):
 
 class SmallUnet(nn.Module):
     "Here we aggregate feature from different resolution. It is actually an up branch of Unet"
-    def __init__(self, size_to_channel):
+    def __init__(self, size_to_channel, circular=False):
         super().__init__()
         
         self.convs = nn.ModuleList()
@@ -341,7 +342,7 @@ class SmallUnet(nn.Module):
         for i in range(  len(size_to_channel)  ):
             in_channel = size_to_channel[size] + extra_channel
             upsample = i != (len(size_to_channel)-1) 
-            self.convs.append(     ConvLayer(in_channel, 512, 3, upsample=upsample)      )
+            self.convs.append(     ConvLayer(in_channel, 512, 3, upsample=upsample, circular=circular)      )
             size *= 2
             extra_channel = 512
     
@@ -350,9 +351,12 @@ class SmallUnet(nn.Module):
      
         for conv, feature in zip(self.convs, feature_list):
             if feature.shape[2] != 4:  
+                # print('feature2: ', feature.shape)
+                # print('previos2: ', previos.shape)
                 feature = torch.cat( [feature,previos], dim=1 )
+            # print('feature1: ', feature.shape)
             previos = conv(feature)
-            
+            # print('previos1: ', previos.shape)
         return previos
 
 
@@ -374,7 +378,7 @@ class Encoder(nn.Module):
 
         # self.convs1 = ConvLayer(args.number_of_semantic+1, channels[args.scene_size[0]], 1)  # this 1 is edge map
         in_c = 1 if not args.extract_model else 3
-        self.convs1 = ConvLayer(in_c, channels[args.scene_size[0]], 1)  # this 1 is edge map
+        self.convs1 = ConvLayer(in_c, channels[args.scene_size[0]], 1)  
 
         log_size = int(math.log(args.scene_size[0], 2))
 
@@ -386,10 +390,10 @@ class Encoder(nn.Module):
             out_channel = channels[ out_size ]
             if 4 <= out_size <= args.starting_height_size: 
                 size_to_channel[out_size] = out_channel 
-            self.convs2.append(ResBlock(in_channel, out_channel, blur_kernel))
+            self.convs2.append(ResBlock(in_channel, out_channel, blur_kernel, circular=self.args.circular))
             in_channel = out_channel
 
-        self.unet = SmallUnet( size_to_channel )
+        self.unet = SmallUnet( size_to_channel, circular=self.args.circular )
 
         w_over_h = args.scene_size[1] / args.scene_size[0]
         assert w_over_h.is_integer(), 'non supported scene_size'
