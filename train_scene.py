@@ -44,7 +44,7 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt_save_frenquency", type=int, default=10000, help='iter frenquency to save checkpoint')
     parser.add_argument("--start_keeping_iter", type=int, default=30000, help='after this, saved ckpt will not be removed. See CheckpointSave for details')
     parser.add_argument("--batch_size", type=int, default=4, help='batch size')
-    parser.add_argument("--n_sample", type=int, default=16, help='for visualization')  
+    parser.add_argument("--n_sample", type=int, default=8, help='for visualization')  
     parser.add_argument("--lr", type=float, default=0.002, help='learning rate')
     parser.add_argument("--start_iter", type=int, default=0, help='starting iter')    
     parser.add_argument("--ckpt", type=str, default=None, help='path to sceneGAN training ckpt.')

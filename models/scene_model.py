@@ -61,9 +61,9 @@ class Generator(nn.Module):
         for _ in range(self.log_size):  
             expected_out_size *= 2 
             out_channel = self.channels[expected_out_size]
-            self.convs.append( StyledConv( in_channel, out_channel, 3, args.style_dim, upsample=True, blur_kernel=blur_kernel ) )
-            self.convs.append( StyledConv(out_channel, out_channel, 3, args.style_dim, blur_kernel=blur_kernel) )
-            self.to_rgbs.append(ToRGB(out_channel, args.style_dim, out_channel = final_channel))
+            self.convs.append( StyledConv( in_channel, out_channel, 3, args.style_dim, upsample=True, blur_kernel=blur_kernel, circular=args.circular ) )
+            self.convs.append( StyledConv(out_channel, out_channel, 3, args.style_dim, blur_kernel=blur_kernel, circular=args.circular ) )
+            self.to_rgbs.append(ToRGB(out_channel, args.style_dim, out_channel = final_channel, circular=args.circular ))
             in_channel = out_channel                               
       
         
