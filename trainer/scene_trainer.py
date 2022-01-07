@@ -20,6 +20,8 @@ import time
 from trainer.render import render, set_param, getTexPos, height_to_normal
 import random
 
+# from torch.optim.lr_scheduler import StepLR
+
 def get_edges(t):
     ByteTensor = torch.cuda.ByteTensor
     edge = ByteTensor(t.size()).zero_()
@@ -85,7 +87,7 @@ class Trainer():
             self.ckpt_saver = CheckpointSaver( args, os.path.join('output',self.args.name,'checkpoint')  ) 
             self.ckpt_saver_eval = CheckpointSaver( args, os.path.join('output',self.args.name,'checkpoint_eval')  ) 
             self.writer = SummaryWriter( os.path.join('output',self.args.name,'Log') )   
-            self.prepare_visualization_data()       
+            # self.prepare_visualization_data()       
 
         synchronize()
               
@@ -121,9 +123,20 @@ class Trainer():
     def prepare_optimizer(self):
         g_reg_ratio = self.args.g_reg_every / (self.args.g_reg_every + 1)    
         d_reg_ratio = self.args.d_reg_every / (self.args.d_reg_every + 1)  
+
+
+
+        # self.optimizerG = optim.Adam([{'params':self.generator.encoder.parameters(), 'lr':self.args.lr*g_reg_ratio*0.1},
+        #                               {'params':self.generator.convs.parameters()}, 
+        #                               {'params':self.generator.to_rgbs.parameters()} 
+        #                             ], lr=self.args.lr*g_reg_ratio, betas=(0**g_reg_ratio, 0.99**g_reg_ratio) 
+        #                             )
+
         self.optimizerG = optim.Adam( self.generator.parameters(), lr=self.args.lr*g_reg_ratio, betas=(0**g_reg_ratio, 0.99**g_reg_ratio) )
         self.optimizerD = optim.Adam( self.netD.parameters(), lr=self.args.lr*d_reg_ratio, betas=(0**d_reg_ratio, 0.99**d_reg_ratio) )
      
+
+
 
     def load_ckpt(self):
        
@@ -154,7 +167,8 @@ class Trainer():
         data = sample_n_data(self.args.n_sample, self.test_loader, self.args.batch_size)   
         self.test_sample = process_data( self.args, data, self.device )
         self.image_test_saver( self.test_sample['real_img'], 'real.png' ) 
-      
+        self.fix_z = torch.randn( 1, self.args.style_dim, device=self.device).repeat(self.args.n_sample,1)
+
 
     def write_loss(self,count):
         for key in self.loss_dict:
@@ -170,6 +184,8 @@ class Trainer():
 
 
     def visualize(self, count):
+
+        self.prepare_visualization_data()       
         with torch.no_grad():  
             output = self.g_ema( self.train_sample['global_pri'] )    
             self.image_train_saver( self.train_sample['global_pri'] , str(count).zfill(6)+'_pat.png' )
@@ -178,6 +194,12 @@ class Trainer():
             output = self.g_ema( self.test_sample['global_pri'] )     
             self.image_test_saver( self.test_sample['global_pri'] , str(count).zfill(6)+'_pat.png' ) 
             self.image_test_saver( output['image'] , str(count).zfill(6)+'.png' ) 
+
+            # fix style keep changing patterns
+            if self.args.nocond_z:
+                output = self.g_ema( self.train_sample['global_pri'], styles=[self.fix_z], input_type='z' )    
+                self.image_train_saver( output['image'] , str(count).zfill(6)+'_fixstyle.png' )
+                self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_fixstyle_tile.png' ) # save tiled image
            
 
     def save_ckpt(self, count):
@@ -316,10 +338,10 @@ class Trainer():
                     # tex_pos = getTexPos(ren_fea.shape[2], size, 'cuda').unsqueeze(0)
                     nocrop_real_rens = render(nocrop_real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
 
-                self.image_train_saver( self.data['global_pri'], f'{count}pats.png' )   
-                self.image_train_saver( 2*fake_rens-1, f'{count}fake_rens.png' )   
-                self.image_train_saver( 2*real_rens-1, f'{count}real_rens.png' )   
-                self.image_train_saver( 2*nocrop_real_rens-1, f'{count}real_rens_nocrop.png' )   
+                self.image_train_saver( self.data['global_pri'], f'{str(count).zfill(6)}pats.png' )   
+                self.image_train_saver( 2*fake_rens-1, f'{str(count).zfill(6)}fake_rens.png' )   
+                self.image_train_saver( 2*real_rens-1, f'{str(count).zfill(6)}real_rens.png' )   
+                self.image_train_saver( 2*nocrop_real_rens-1, f'{str(count).zfill(6)}real_rens_nocrop.png' )   
 
             vgg_loss = self.get_vgg_loss(self.preVGG(fake_rens), self.preVGG(real_rens)) * self.args.vgg_reg_every * self.args.vgg_regularize
 
@@ -349,6 +371,17 @@ class Trainer():
 
         for idx in range(self.args.iter):
             count = idx + self.args.start_iter
+
+            if get_rank() == 0:
+                if count % 10 == 0:
+                    self.write_loss(count)
+                if count % 50 == 0:
+                    self.print_loss(count)
+                if count % 100 == 0:
+                    self.visualize(count)  
+                if count % self.args.ckpt_save_frenquency == 0:  
+                    self.save_ckpt(count)
+            print('..............start step............ ', count, '......learning rate.........', self.optimizerG.param_groups[0]['lr'])
 
             if count > self.args.iter:
                 print("Done!")
@@ -400,4 +433,9 @@ class Trainer():
                     self.visualize(count)  
                 if count % self.args.ckpt_save_frenquency == 0:  
                     self.save_ckpt(count)
+
+            if count % self.args.lr_gamma_every ==0 and self.optimizerG.param_groups[0]['lr'] < self.args.lr_limit*self.args.g_reg_every / (self.args.g_reg_every + 1) and count!=0:
+                self.optimizerG.param_groups[0]['lr'] += self.args.lr_gamma
+                self.optimizerD.param_groups[0]['lr'] += self.args.lr_gamma
+
             synchronize()

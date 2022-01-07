@@ -33,7 +33,9 @@ class Generator(nn.Module):
         final_channel = 6 if args.extract_model else 5
 
         self.encoder = Encoder(args, device=self.device)
-        
+        if self.args.color_cond:
+            self.encoder2 = Encoder2(args, device=self.device)
+
         self.w_over_h = args.scene_size[1] / args.scene_size[0]
         assert self.w_over_h.is_integer(), 'non supported scene_size'
         self.w_over_h = int(self.w_over_h)
@@ -63,7 +65,7 @@ class Generator(nn.Module):
             out_channel = self.channels[expected_out_size]
             self.convs.append( StyledConv( in_channel, out_channel, 3, args.style_dim, upsample=True, blur_kernel=blur_kernel, circular=args.circular ) )
             self.convs.append( StyledConv(out_channel, out_channel, 3, args.style_dim, blur_kernel=blur_kernel, circular=args.circular ) )
-            self.to_rgbs.append(ToRGB(out_channel, args.style_dim, out_channel = final_channel, circular=args.circular ))
+            self.to_rgbs.append(ToRGB(out_channel, args.style_dim, out_channel = final_channel, circular=args.circular))
             in_channel = out_channel                               
       
         
@@ -87,15 +89,23 @@ class Generator(nn.Module):
         return self.style(input)
 
     def __prepare_starting_feature(self, global_pri, styles, input_type):
-        feature, z, loss = self.encoder(global_pri)
-        if input_type == None:
-            styles = [z]
-            input_type = 'z'
-        return  feature, styles, input_type, loss
+        if self.args.color_cond:
+            feature, _, _ = self.encoder(global_pri)
+            z, loss = self.encoder2(global_pri)
+            if input_type == None:
+                styles = [z]
+                input_type = 'z'
+            return  feature, styles, input_type, loss            
+        else:
+            feature, z, loss = self.encoder(global_pri)
+            if input_type == None:
+                styles = [z]
+                input_type = 'z'
+            return  feature, styles, input_type, loss
 
     def __prepare_letent(self, styles, inject_index, truncation, truncation_latent,  input_type):
         "This is a private function to prepare w+ space code needed during forward"
-
+        # print(len(styles), styles[0].shape)
         if input_type == 'z':
             styles = [self.style(s).unsqueeze(1) for s in styles]  # each one is bs*1*512
         elif input_type == 'w':
@@ -109,6 +119,8 @@ class Generator(nn.Module):
             for style in styles:
                 style_t.append( truncation_latent + truncation * (style-truncation_latent)  )
             styles = style_t
+        # print(len(styles))
+        # print(len(styles), styles[0].shape)
 
         # duplicate and concat into BS * n_latent * code_len 
         if len(styles) == 1:
@@ -121,6 +133,7 @@ class Generator(nn.Module):
             latent = torch.cat([latent1, latent2], 1)
         else:
             latent = torch.cat( styles, 1 )
+        # print('latent ',latent.shape)
 
         return latent
 
@@ -177,7 +190,7 @@ class Generator(nn.Module):
 
         """
         if input_type == 'z' or input_type == 'w': 
-            assert len(styles) in [1,2,self.n_latent], 'number of styles must be 1, 2 or self.n_latent'
+            assert len(styles) in [1,2,self.n_latent], f'number of styles must be 1, 2 or self.n_latent but got {len(styles)}'
         elif input_type == 'w+':
             assert styles.ndim == 3 and styles.shape[1] == self.n_latent
         elif input_type == None:
@@ -186,6 +199,7 @@ class Generator(nn.Module):
             assert False, 'not supported input_type'
 
         start_feature, styles, input_type, loss = self.__prepare_starting_feature(global_pri, styles, input_type)
+        # print( 'starting feature: ',start_feature[0,0,0])
         latent = self.__prepare_letent(styles, inject_index, truncation, truncation_latent, input_type)
         noise = self.__prepare_noise(noise, randomize_noise)
     
@@ -199,11 +213,11 @@ class Generator(nn.Module):
         for conv1, conv2, noise1, noise2, to_rgb in zip( self.convs[::2], self.convs[1::2], noise[::2], noise[1::2], self.to_rgbs ):
             # print('out: ',out.shape)
             out = conv1(out, latent[:, i], noise=noise1)  
-            # print('out: ',out.shape)
+            # print('out: ',out[0,0, 20, 20:25])
             out = conv2(out, latent[:, i + 1], noise=noise2)   
-            # print('out: ',out.shape)
+            # print('out: ',out[0,0, 20, 20:25])
             skip = to_rgb(out, latent[:, i + 2], skip)
-            # print('skip: ',skip.shape)
+            # print('skip: ',skip[0, 0, 20, 20:25])
 
             i += 2
             
@@ -294,7 +308,7 @@ class Discriminator(nn.Module):
 
         for i in range(log_size, 2, -1):
             out_channel = channels[2 ** (i - 1)]
-            convs.append(ResBlock(in_channel, out_channel, blur_kernel, circular=self.args.circular))
+            convs.append(ResBlock(in_channel, out_channel, blur_kernel, circular = self.args.circular))
             in_channel = out_channel
 
         self.convs = nn.Sequential(*convs)
@@ -302,7 +316,7 @@ class Discriminator(nn.Module):
         self.stddev_group = 4
         self.stddev_feat = 1
 
-        self.final_conv = ConvLayer(in_channel + 1, channels[4], 3, circular=self.args.circular)
+        self.final_conv = ConvLayer(in_channel + 1, channels[4], 3, circular = self.args.circular)
         self.final_linear = nn.Sequential( EqualLinear(channels[4] * 4 * 4, channels[4], activation='fused_lrelu'),
                                            EqualLinear(channels[4], 1) )
 
@@ -442,11 +456,83 @@ class Encoder(nn.Module):
         # if no condition z
         else:
             # print('out: ',out.shape[0], self.args.style_dim)
-            z = torch.randn(out.shape[0], self.args.style_dim, device=self.device)
+            z = self.args.truncate_z * torch.randn(out.shape[0], self.args.style_dim, device=self.device)
             # loss = self.get_kl_loss(z, z)*0.0 # no 
             loss = torch.tensor([0.0], requires_grad=True, device=self.device)
             # print('z ',z.shape)
 
         return starting_feature, z, loss
 
+
+class Encoder2(nn.Module):
+    def __init__(self, args, device ,blur_kernel=[1, 3, 3, 1]):
+        super().__init__()
+        self.args = args
+
+        self.device = device
+        channels = { 4: 512,
+                     8: 512,
+                     16: 512,
+                     32: 512,
+                     64: 512,
+                     128: 128 * args.channel_multiplier,
+                     256: 64 * args.channel_multiplier,
+                     512: 32 * args.channel_multiplier,
+                     1024: 16 * args.channel_multiplier }
+
+        # self.convs1 = ConvLayer(args.number_of_semantic+1, channels[args.scene_size[0]], 1)  # this 1 is edge map
+        in_c = 3
+        self.convs1 = ConvLayer(in_c, channels[args.scene_size[0]], 1)  
+
+        log_size = int(math.log(args.scene_size[0], 2))
+
+        in_channel = channels[args.scene_size[0]]
+        size_to_channel = {} # indicate from which resolution we provide spatial feature 
+        self.convs2 = nn.ModuleList()
+        for i in range(log_size, 2, -1):
+            out_size = 2 ** (i-1)
+            out_channel = channels[ out_size ]
+            if 4 <= out_size <= args.starting_height_size: 
+                size_to_channel[out_size] = out_channel 
+            self.convs2.append(ResBlock(in_channel, out_channel, blur_kernel, circular=self.args.circular))
+            in_channel = out_channel
+
+        w_over_h = args.scene_size[1] / args.scene_size[0]
+        assert w_over_h.is_integer(), 'non supported scene_size'
+
+        self.final_linear = EqualLinear(channels[4] * 4 * 4 * int(w_over_h), channels[4], activation='fused_lrelu')
+        self.mu_linear = EqualLinear(channels[4], int(args.style_dim*0.5))
+        self.var_linear = EqualLinear(channels[4], int(args.style_dim*0.5))
+
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)         
+        return eps.mul(std) + mu
+    
+
+    def get_kl_loss(self, mu, logvar):
+        return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+
+
+    def forward(self, input):
+        batch = input.shape[0]
+        intermediate_feature = []
+        # print('input: ',input.shape)
+        out = self.convs1(input)
+        # print('out: ',out.shape)
+        for conv in self.convs2:
+            out = conv(out)
+
+        out = self.final_linear( out.view(batch, -1))
+        mu = self.mu_linear(out)
+        logvar = self.var_linear(out)
+
+        z1 = self.reparameterize(mu, logvar)
+        z2 = torch.randn(z1.shape[0], int(self.args.style_dim*0.5), device=self.device)
+
+        loss = self.get_kl_loss(mu, logvar)
+        z = torch.cat([z1,z2], dim=-1)
+
+        return z, loss
 

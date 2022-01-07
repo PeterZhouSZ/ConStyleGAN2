@@ -66,6 +66,23 @@ class CircularUpsample(nn.Module):
         return out
 
 
+# this is ciruclar padding
+# class CircularPadding(nn.Module):
+#     def __init__(self, scale_factor=2):
+#         super().__init__()
+#         self.factor=scale_factor
+
+#     def forward(self, input):
+
+#         _,_,h,w=input.shape
+
+#         t = torch.cat([input,input[:,:,:,0:1]],dim=-1)
+
+
+
+#         return out
+
+
 class Downsample(nn.Module):
     def __init__(self, kernel, factor=2):
         super().__init__()
@@ -99,10 +116,10 @@ class Blur(nn.Module):
         self.pad = pad
 
     def forward(self, input):
-        # print('blur: input ', input.shape)
+        # print('blur input ', input[0,0,0:10,0])
         # print('pad ', self.pad)
         out = upfirdn2d(input, self.kernel, pad=self.pad)
-        # print('blur: out ', out.shape)
+        # print('blur out ', out[0,0,0:10,0])
         return out
 
 
@@ -264,12 +281,13 @@ class ModulatedConv2d(nn.Module):
         
         # apply afine transformation on style 
         style = self.modulation(style).view(batch, 1, in_channel, 1, 1)
-
+        # print('style ', style[0,0,0:5,0,0])
         weight = self.scale * self.weight * style
-
+        # print('weight1: ', weight[0,0,0:10,0,0])
         if self.demodulate:
             demod = torch.rsqrt(weight.pow(2).sum([2, 3, 4]) + 1e-8)
             weight = weight * demod.view(batch, self.out_channel, 1, 1, 1)
+        # print('weight2: ', weight[0,0,0:10,0,0])
 
         weight = weight.view( batch * self.out_channel, in_channel, self.kernel_size, self.kernel_size )
 
@@ -277,30 +295,30 @@ class ModulatedConv2d(nn.Module):
             # print('.............upsample....................')
             input = input.view(1, batch * in_channel, height, width)
 
-            weight = weight.view( batch, self.out_channel, in_channel, self.kernel_size, self.kernel_size )
-
             if self.circular:
-                weight = weight.reshape( batch * self.out_channel, in_channel, self.kernel_size, self.kernel_size )
-                # print('input1: ',input.shape)
+                # weight = weight.reshape( batch * self.out_channel, in_channel, self.kernel_size, self.kernel_size )
+                # print('input up1: ',input[0,0,0,0:5])
                 input = F.pad(self.up(input), (self.padding, self.padding, self.padding, self.padding), mode ='circular')
-                # print('input2: ',input.shape)
+                # print('input up2: ',input[0,0,0,0:5])
                 # print('weight: ',weight.shape)
                 out = F.conv2d(input, weight, groups=batch)
-                # print('out: ',out.shape)
+                # print('input up2: ',input[0,0,0,0:5], '  out up ',out[0,0,0,0:5])
             else:
+                weight = weight.view( batch, self.out_channel, in_channel, self.kernel_size, self.kernel_size )
                 weight = weight.transpose(1, 2).reshape( batch * in_channel, self.out_channel, self.kernel_size, self.kernel_size )
                 # print('input: ',input.shape)
                 # print('weight: ',weight.shape)
+                # print('input up2: ',input[0,0,0,0:5])
 
                 out = F.conv_transpose2d(input, weight, padding=0, stride=2, groups=batch)
-                # print('out: ',out.shape)
+                # print('out up ',out[0,0,0,0:5])
 
             _, _, height, width = out.shape
             out = out.view(batch, self.out_channel, height, width)
             if not self.circular:
-                # print('before blur ', out.shape)
+                # print('out before blur ',out[0,0,0,0:5])
                 out = self.blur(out)
-            # print('after blur ', out.shape)
+                # print('out after blur ',out[0,0,0,0:5])
 
         elif self.downsample:
             # print('..................downsample......................')
@@ -315,9 +333,16 @@ class ModulatedConv2d(nn.Module):
             input = input.view(1, batch * in_channel, height, width)
             if self.circular:
                 input = F.pad(input, (self.padding, self.padding, self.padding, self.padding), mode ='circular')
+                # print('input noup: ',input[0,0,0,0:5],'  weight noup: ',weight[0,0:5,0,0])
                 out = F.conv2d(input, weight, groups=batch)
+                # out = F.conv2d(input, weight, padding=self.padding, groups=batch)
+                # print('out noup: ',out[0,0,0,0:5])
+                # print('weight grad: ', weight.grad[0,0,0,0:5])
             else:
+                # print('input noup: ',input[0,0,0,0:5],'  weight noup: ',weight[0,0:5,0,0])                
                 out = F.conv2d(input, weight, padding=self.padding, groups=batch)
+                # print('input2 noup: ',input[0,0,0,0:5],'  weight noup: ',weight[0,0:5,0,0])                
+                # print('out noup: ',out[0,0,0,0:5])
             _, _, height, width = out.shape
             out = out.view(batch, self.out_channel, height, width)
 
@@ -362,9 +387,13 @@ class StyledConv(nn.Module):
 
     def forward(self, input, style, noise=None):
         out = self.conv(input, style)
+        # print('out no noise: ', out[0,0,0,0:10])
         out = self.noise(out, noise=noise)
+        # print('out noise: ', out[0,0,0,0:10])
+
         # out = out + self.bias
         out = self.activate(out)
+        # print('out act: ', out[0,0,0,0:10])
         return out
 
 
