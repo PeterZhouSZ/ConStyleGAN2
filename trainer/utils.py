@@ -134,7 +134,7 @@ class ImageSaver():
         # print(name, x.shape)
 
         if x.shape[1]==5:
-            x = torch.cat([x[:,0:1,:,:].repeat(1,3,1,1), x[:,1:4,:,:], x[:,4:5,:,:].repeat(1,3,1,1)],dim=-1)
+            x = torch.cat([x[:,0:1,:,:].repeat(1,3,1,1), 2*((x[:,1:4,:,:]+1)*0.5)**(1/2.2)-1, x[:,4:5,:,:].repeat(1,3,1,1)],dim=-1)
         elif x.shape[1]==6:
             x = torch.cat([x[:,0:1,:,:].repeat(1,3,1,1), x[:,1:4,:,:], x[:,4:5,:,:].repeat(1,3,1,1), x[:,5:6,:,:].repeat(1,3,1,1)],dim=-1)
         # print(name, x.shape)

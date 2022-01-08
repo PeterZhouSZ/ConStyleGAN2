@@ -37,6 +37,7 @@ def process_data(args, data, device):
     data = to_device(data, device)
     out = {}
 
+    out['color_pri'] = data['scene_ccond'] if args.color_cond else None
     out['real_img'] = data['scene_img']
     out['global_pri'] = data['scene_sem']
 
@@ -187,20 +188,31 @@ class Trainer():
 
         self.prepare_visualization_data()       
         with torch.no_grad():  
-            output = self.g_ema( self.train_sample['global_pri'] )    
+            output = self.g_ema( self.train_sample['global_pri'], self.train_sample['color_pri'] )    
             self.image_train_saver( self.train_sample['global_pri'] , str(count).zfill(6)+'_pat.png' )
+            self.image_train_saver( self.train_sample['real_img'] , str(count).zfill(6)+'_real.png' )
             self.image_train_saver( output['image'] , str(count).zfill(6)+'.png' )
             self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_tile.png' ) # save tiled image
-            output = self.g_ema( self.test_sample['global_pri'] )     
+            output = self.g_ema( self.test_sample['global_pri'], self.train_sample['color_pri'] )     
             self.image_test_saver( self.test_sample['global_pri'] , str(count).zfill(6)+'_pat.png' ) 
             self.image_test_saver( output['image'] , str(count).zfill(6)+'.png' ) 
 
             # fix style keep changing patterns
             if self.args.nocond_z:
-                output = self.g_ema( self.train_sample['global_pri'], styles=[self.fix_z], input_type='z' )    
+                output = self.g_ema( self.train_sample['global_pri'], self.train_sample['color_pri'], styles=[self.fix_z], input_type='z' )    
                 self.image_train_saver( output['image'] , str(count).zfill(6)+'_fixstyle.png' )
                 self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_fixstyle_tile.png' ) # save tiled image
-           
+
+            if self.args.color_cond:
+
+                self.image_train_saver( 2*((self.train_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_color_cond.png' )
+                self.image_train_saver( 2*((self.color_condD+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_color_condD.png' )
+                self.image_train_saver( self.cond_D , str(count).zfill(6)+'_condD.png' )
+                self.image_train_saver( self.data['real_img'] , str(count).zfill(6)+'_RealD.png' )
+
+                self.image_test_saver( 2*((self.test_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_color_cond.png' )
+
+
 
     def save_ckpt(self, count):
 
@@ -233,6 +245,11 @@ class Trainer():
             # print(self.cond_D.shape)
             # print(augmented_real_img.shape)
 
+        if self.args.color_cond:
+            augmented_fake_img = torch.cat([augmented_fake_img, self.color_condD], dim=1)
+            augmented_real_img = torch.cat([augmented_real_img, self.color_condD], dim=1)
+
+
         real_pred = self.netD(augmented_real_img)
         fake_pred = self.netD(augmented_fake_img)        
         d_loss = d_logistic_loss(real_pred, fake_pred)  
@@ -252,6 +269,8 @@ class Trainer():
 
         if self.args.cond_D:
             augmented_fake_img = torch.cat([augmented_fake_img, self.cond_D], dim=1)
+        if self.args.color_cond:
+            augmented_fake_img = torch.cat([augmented_fake_img, self.color_condD], dim=1)
 
         fake_pred = self.netD(augmented_fake_img)
         g_loss = g_nonsaturating_loss(fake_pred)
@@ -270,6 +289,9 @@ class Trainer():
 
         in_D = torch.cat([self.data['real_img'], self.cond_D], dim=1) if self.args.cond_D else self.data['real_img']
 
+        if self.args.color_cond:
+            in_D = torch.cat([in_D, self.color_condD], dim=1)
+
         real_pred = self.netD(in_D)
 
         r1_loss = d_r1_loss(real_pred, self.data['real_img'])
@@ -283,7 +305,7 @@ class Trainer():
        
     def regularizePath(self):
 
-        output = self.generator(self.data['global_pri'], return_latents=True, return_loss=False)
+        output = self.generator(self.data['global_pri'], self.data['color_pri'], return_latents=True, return_loss=False)
         fake_img = output['image']
         latents = output['latent']
 
@@ -303,7 +325,7 @@ class Trainer():
 
     def regularizeVGG(self, count, rand0=None, nocrop_real=None):
         randomize_noise = not self.args.vgg_fix_noise
-        output = self.generator(self.data['global_pri'], return_loss=False, randomize_noise=randomize_noise)
+        output = self.generator(self.data['global_pri'], self.data['color_pri'], return_loss=False, randomize_noise=randomize_noise)
         fake_img = output['image']
 
         if self.args.tile_crop:
@@ -329,7 +351,7 @@ class Trainer():
             # tex_pos = getTexPos(ren_fea.shape[2], size, 'cuda').unsqueeze(0)
             real_rens = render(real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
 
-            if get_rank()==0 and count%100==0:
+            if get_rank()==0 and count%200==0:
 
                 if nocrop_real is not None:
                     nocrop_real_fea = nocrop_real*0.5+0.5
@@ -372,15 +394,6 @@ class Trainer():
         for idx in range(self.args.iter):
             count = idx + self.args.start_iter
 
-            if get_rank() == 0:
-                if count % 10 == 0:
-                    self.write_loss(count)
-                if count % 50 == 0:
-                    self.print_loss(count)
-                if count % 100 == 0:
-                    self.visualize(count)  
-                if count % self.args.ckpt_save_frenquency == 0:  
-                    self.save_ckpt(count)
             print('..............start step............ ', count, '......learning rate.........', self.optimizerG.param_groups[0]['lr'])
 
             if count > self.args.iter:
@@ -390,7 +403,7 @@ class Trainer():
             self.data = process_data( self.args, next(self.train_loader), self.device )
             
             # forward G  
-            output = self.generator(self.data['global_pri'])
+            output = self.generator(self.data['global_pri'], self.data['color_pri'])
             self.fake_img = output['image']
             self.kl_loss = output['klloss']*self.args.kl_lambda
             self.loss_dict['kl'] = self.kl_loss.item()
@@ -405,6 +418,9 @@ class Trainer():
 
                 if self.args.cond_D:
                     self.cond_D = mycrop(self.data['global_pri'], self.fake_img.shape[-1], rand0=rand0)
+
+                if self.args.color_cond:
+                    self.color_condD = mycrop(self.data['color_pri'], self.fake_img.shape[-1], rand0=rand0)
 
             else:
                 rand0=None
@@ -429,7 +445,7 @@ class Trainer():
                     self.write_loss(count)
                 if count % 50 == 0:
                     self.print_loss(count)
-                if count % 100 == 0:
+                if count % 200 == 0:
                     self.visualize(count)  
                 if count % self.args.ckpt_save_frenquency == 0:  
                     self.save_ckpt(count)

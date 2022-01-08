@@ -96,6 +96,19 @@ def get_scene_data(args, img, composition=None):
 
     else:
         scene_sem = full_img[0:1,:,3*h:4*h]
+
+        if args.color_cond:
+            tile_color = scene_sem*D
+            tile_mean = tile_color.sum((-2,-1),keepdim=True)/scene_sem.sum((-2,-1),keepdim=True)
+
+            grout_color = (1-scene_sem)*D
+            grout_mean = grout_color.sum((-2,-1),keepdim=True)/scene_sem.sum((-2,-1),keepdim=True)
+
+            total_color = tile_mean*scene_sem + grout_mean*(1-scene_sem)
+
+            # print('total color shape:', total_color.shape)
+            out['scene_ccond'] = 2*total_color-1
+
         out['scene_sem'] = 2*scene_sem-1
 
     out['scene_img'] = 2*scene_img-1

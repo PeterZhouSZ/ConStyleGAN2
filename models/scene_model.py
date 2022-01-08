@@ -88,10 +88,10 @@ class Generator(nn.Module):
     def get_latent(self, input):
         return self.style(input)
 
-    def __prepare_starting_feature(self, global_pri, styles, input_type):
+    def __prepare_starting_feature(self, global_pri, color_pri, styles, input_type):
         if self.args.color_cond:
             feature, _, _ = self.encoder(global_pri)
-            z, loss = self.encoder2(global_pri)
+            z, loss = self.encoder2(color_pri)
             if input_type == None:
                 styles = [z]
                 input_type = 'z'
@@ -148,7 +148,7 @@ class Generator(nn.Module):
 
         return noise
   
-    def forward(self, global_pri, styles=None, return_latents=False, inject_index=None, truncation=1, truncation_latent=None, input_type=None, noise=None, randomize_noise=True, return_loss=True):
+    def forward(self, global_pri, color_pri, styles=None, return_latents=False, inject_index=None, truncation=1, truncation_latent=None, input_type=None, noise=None, randomize_noise=True, return_loss=True):
 
         """
         global_pri: a tensor with the shape BS*C*self.prior_size*self.prior_size. Here, in background training,
@@ -198,7 +198,7 @@ class Generator(nn.Module):
         else:
             assert False, 'not supported input_type'
 
-        start_feature, styles, input_type, loss = self.__prepare_starting_feature(global_pri, styles, input_type)
+        start_feature, styles, input_type, loss = self.__prepare_starting_feature(global_pri, color_pri, styles, input_type)
         # print( 'starting feature: ',start_feature[0,0,0])
         latent = self.__prepare_letent(styles, inject_index, truncation, truncation_latent, input_type)
         noise = self.__prepare_noise(noise, randomize_noise)
@@ -301,6 +301,9 @@ class Discriminator(nn.Module):
 
         if args.cond_D:
             in_c += 1
+
+        if args.color_cond:
+            in_c += 3
 
         convs = [ ConvLayer(in_c, channels[input_size], 1) ]        
 
