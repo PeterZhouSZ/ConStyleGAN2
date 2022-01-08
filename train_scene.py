@@ -42,6 +42,7 @@ if __name__ == "__main__":
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--iter", type=int, default=800000, help='total number of iters for training')
     parser.add_argument("--ckpt_save_frenquency", type=int, default=10000, help='iter frenquency to save checkpoint')
+    parser.add_argument("--save_img_freq", type=int, default=2000, help='iter frenquency to save imgs')
     parser.add_argument("--start_keeping_iter", type=int, default=30000, help='after this, saved ckpt will not be removed. See CheckpointSave for details')
     parser.add_argument("--batch_size", type=int, default=4, help='batch size')
     parser.add_argument("--n_sample", type=int, default=8, help='for visualization')  

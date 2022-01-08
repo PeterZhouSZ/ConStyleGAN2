@@ -59,10 +59,15 @@ def get_scene_data(args, img, composition=None):
         R = full_img[0:1,:,2*h:3*h]**gamma
 
         scene_img = torch.cat([H, D, R], dim=0)
+        scene_sem = full_img[0:1,:,3*h:4*h]
+        
+
+        rand0 = [random.randint(-args.scene_size[0]+1, D.shape[-1]-1),random.randint(-args.scene_size[0]+1, D.shape[-1]-1)]
 
         # randomly crop
         # print('before: ',scene_img.shape)
-        scene_img = mycrop(scene_img.unsqueeze(0), H.shape[-1]).squeeze(0)
+        scene_sem = mycrop(scene_sem.unsqueeze(0), H.shape[-1], rand0=rand0).squeeze(0)
+        scene_img = mycrop(scene_img.unsqueeze(0), H.shape[-1], rand0=rand0).squeeze(0)
         # print('after: ',scene_img.shape)
 
     else:
@@ -95,7 +100,6 @@ def get_scene_data(args, img, composition=None):
         scene_img = torch.cat([scene_img, full_img[0:1,:,3*h:4*h]], dim=0)
 
     else:
-        scene_sem = full_img[0:1,:,3*h:4*h]
 
         if args.color_cond:
             tile_color = scene_sem*D

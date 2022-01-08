@@ -111,7 +111,6 @@ class Trainer():
         self.generator = DDP( self.generator, device_ids=[self.args.local_rank], output_device=self.args.local_rank, broadcast_buffers=False )
         self.netD = DDP( self.netD, device_ids=[self.args.local_rank], output_device=self.args.local_rank, broadcast_buffers=False )
 
-
     def prepare_model(self):
         self.generator = Generator(self.args,self.device).to(self.device)
         self.netD = Discriminator(self.args).to(self.device)
@@ -125,8 +124,6 @@ class Trainer():
         g_reg_ratio = self.args.g_reg_every / (self.args.g_reg_every + 1)    
         d_reg_ratio = self.args.d_reg_every / (self.args.d_reg_every + 1)  
 
-
-
         # self.optimizerG = optim.Adam([{'params':self.generator.encoder.parameters(), 'lr':self.args.lr*g_reg_ratio*0.1},
         #                               {'params':self.generator.convs.parameters()}, 
         #                               {'params':self.generator.to_rgbs.parameters()} 
@@ -136,9 +133,6 @@ class Trainer():
         self.optimizerG = optim.Adam( self.generator.parameters(), lr=self.args.lr*g_reg_ratio, betas=(0**g_reg_ratio, 0.99**g_reg_ratio) )
         self.optimizerD = optim.Adam( self.netD.parameters(), lr=self.args.lr*d_reg_ratio, betas=(0**d_reg_ratio, 0.99**d_reg_ratio) )
      
-
-
-
     def load_ckpt(self):
        
         print("load ckpt: ", self.args.ckpt)
@@ -152,29 +146,24 @@ class Trainer():
 
         self.args.start_iter = ckpt["iters"]
        
-
-
     def prepare_dataloader(self):
         # print('prepare dataloader..................')
         self.train_loader = sample_data( self.args, get_scene_dataloader(self.args, train=True)   )
         self.test_loader = sample_data( self.args,  get_scene_dataloader( self.args, train=False)  )
 
-
     def prepare_visualization_data(self):
         data = sample_n_data(self.args.n_sample, self.train_loader, self.args.batch_size)
         # print('prepare data: ', data.shape)
         self.train_sample = process_data( self.args, data, self.device )  
-        self.image_train_saver( self.train_sample['real_img'], 'real.png' )   
+        # self.image_train_saver( self.train_sample['real_img'], 'real.png' )   
         data = sample_n_data(self.args.n_sample, self.test_loader, self.args.batch_size)   
         self.test_sample = process_data( self.args, data, self.device )
         self.image_test_saver( self.test_sample['real_img'], 'real.png' ) 
         self.fix_z = torch.randn( 1, self.args.style_dim, device=self.device).repeat(self.args.n_sample,1)
 
-
     def write_loss(self,count):
         for key in self.loss_dict:
             self.writer.add_scalar(  key, self.loss_dict[key], count  )
-
 
     def print_loss(self,count):
         print( str(count)+' iter finshed' )
@@ -183,36 +172,73 @@ class Trainer():
         print('time has been spent in seconds since you lunched this script ', time.time()-self.tic)
         print(' ')
 
-
     def visualize(self, count):
+
+        # in_D
+        # self.image_train_saver( self.fake_img.detach(), str(count).zfill(6)+'_D.png' )
+        # self.image_train_saver( self.cond_D, str(count).zfill(6)+'_D_condpat.png' )
+        # self.image_train_saver( self.data['real_img'], str(count).zfill(6)+'_D_realimg.png' )
+        # if self.args.color_cond:
+        #     self.image_train_saver( 2*((self.color_condD+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_D_color.png' )
 
         self.prepare_visualization_data()       
         with torch.no_grad():  
-            output = self.g_ema( self.train_sample['global_pri'], self.train_sample['color_pri'] )    
-            self.image_train_saver( self.train_sample['global_pri'] , str(count).zfill(6)+'_pat.png' )
-            self.image_train_saver( self.train_sample['real_img'] , str(count).zfill(6)+'_real.png' )
-            self.image_train_saver( output['image'] , str(count).zfill(6)+'.png' )
-            self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_tile.png' ) # save tiled image
+            ### in training sets
+            output = self.g_ema( self.train_sample['global_pri'], self.train_sample['color_pri'] )
+            self.image_train_saver( self.train_sample['global_pri'] , str(count).zfill(6)+'_eval_pat.png' )
+            self.image_train_saver( self.train_sample['real_img'] , str(count).zfill(6)+'_eval_real.png' )
+            # self.image_train_saver( output['image'] , str(count).zfill(6)+'_eval.png' )
+            self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_eval_tile.png' ) # save tiled image
+
+            # save rendered image
+            real = self.train_sample['real_img']
+            fake = output['image']
+
+            fake_fea_vgg = fake*0.5+0.5
+            real_fea_vgg = real*0.5+0.5
+
+            light, light_pos, size = set_param('cuda')
+
+            fake_N = height_to_normal(fake_fea_vgg[:,0:1,:,:])
+            fake_fea = torch.cat((2*fake_N-1,fake_fea_vgg[:,1:4,:,:],fake_fea_vgg[:,4:5,:,:].repeat(1,3,1,1)),dim=1)
+            tex_pos = getTexPos(fake_fea.shape[2], size, 'cuda').unsqueeze(0)
+            fake_rens = render(fake_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
+
+            real_N = height_to_normal(real_fea_vgg[:,0:1,:,:])
+            real_fea = torch.cat((2*real_N-1,real_fea_vgg[:,1:4,:,:],real_fea_vgg[:,4:5,:,:].repeat(1,3,1,1)),dim=1)
+            # tex_pos = getTexPos(ren_fea.shape[2], size, 'cuda').unsqueeze(0)
+            real_rens = render(real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
+
+            if get_rank()==0 and count%self.args.save_img_freq==0:
+                self.image_train_saver( 2*fake_rens-1, f'{str(count).zfill(6)}_eval_fake_rens.png' )   
+                self.image_train_saver( 2*real_rens-1, f'{str(count).zfill(6)}_eval_real_rens.png' )   
+
+            ### in testing sets
             output = self.g_ema( self.test_sample['global_pri'], self.train_sample['color_pri'] )     
-            self.image_test_saver( self.test_sample['global_pri'] , str(count).zfill(6)+'_pat.png' ) 
-            self.image_test_saver( output['image'] , str(count).zfill(6)+'.png' ) 
+            self.image_test_saver( self.test_sample['global_pri'] , str(count).zfill(6)+'_eval_pat.png' )
+            self.image_test_saver( self.test_sample['real_img'] , str(count).zfill(6)+'_eval_real.png' )
+            # self.image_test_saver( output['image'] , str(count).zfill(6)+'_eval.png' )
+            self.image_test_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_eval_tile.png' ) # save tiled image
 
             # fix style keep changing patterns
             if self.args.nocond_z:
                 output = self.g_ema( self.train_sample['global_pri'], self.train_sample['color_pri'], styles=[self.fix_z], input_type='z' )    
-                self.image_train_saver( output['image'] , str(count).zfill(6)+'_fixstyle.png' )
-                self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_fixstyle_tile.png' ) # save tiled image
+                # self.image_train_saver( output['image'] , str(count).zfill(6)+'_eval_fix.png' )
+                self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_eval_fix_tile.png' ) # save tiled image
 
             if self.args.color_cond:
+                self.image_train_saver( 2*((self.train_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_eval_color.png' )
+                self.image_test_saver( 2*((self.test_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_eval_color.png' )
 
-                self.image_train_saver( 2*((self.train_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_color_cond.png' )
-                self.image_train_saver( 2*((self.color_condD+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_color_condD.png' )
-                self.image_train_saver( self.cond_D , str(count).zfill(6)+'_condD.png' )
-                self.image_train_saver( self.data['real_img'] , str(count).zfill(6)+'_RealD.png' )
+    def visualize_train(self, count, output):
 
-                self.image_test_saver( 2*((self.test_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_color_cond.png' )
-
-
+        # tr
+        self.image_train_saver( self.data['global_pri'] , str(count).zfill(6)+'_tr_pat.png' )
+        self.image_train_saver( self.data['real_img'] , str(count).zfill(6)+'_tr_img.png' )
+        if self.args.color_cond:
+            self.image_train_saver( self.data['color_pri'] , str(count).zfill(6)+'_tr_color.png' )
+        self.image_train_saver( output['image'] , str(count).zfill(6)+'_tr.png' )
+        self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_tr_tile.png' ) # save tiled image
 
     def save_ckpt(self, count):
 
@@ -228,8 +254,6 @@ class Trainer():
         save_dict =  {"g_ema": self.g_ema.state_dict()}
         self.ckpt_saver_eval( save_dict, count )
 
-
-
     def trainD(self):
 
         if self.args.augment:
@@ -242,8 +266,6 @@ class Trainer():
         if self.args.cond_D:
             augmented_fake_img = torch.cat([augmented_fake_img, self.cond_D], dim=1)
             augmented_real_img = torch.cat([augmented_real_img, self.cond_D], dim=1)
-            # print(self.cond_D.shape)
-            # print(augmented_real_img.shape)
 
         if self.args.color_cond:
             augmented_fake_img = torch.cat([augmented_fake_img, self.color_condD], dim=1)
@@ -258,7 +280,6 @@ class Trainer():
         self.optimizerD.zero_grad()
         d_loss.backward()
         self.optimizerD.step()
-
 
     def trainG(self):
        
@@ -282,7 +303,6 @@ class Trainer():
         loss.backward()
         self.optimizerG.step()
 
-
     def regularizeD(self):
        
         self.data['real_img'].requires_grad = True
@@ -301,7 +321,6 @@ class Trainer():
         self.optimizerD.zero_grad()
         r1_loss.backward()
         self.optimizerD.step()
-
        
     def regularizePath(self):
 
@@ -321,7 +340,6 @@ class Trainer():
         mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).cuda()
         std = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).cuda()
         return (x-mean)/std
-
 
     def regularizeVGG(self, count, rand0=None, nocrop_real=None):
         randomize_noise = not self.args.vgg_fix_noise
@@ -351,19 +369,9 @@ class Trainer():
             # tex_pos = getTexPos(ren_fea.shape[2], size, 'cuda').unsqueeze(0)
             real_rens = render(real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
 
-            if get_rank()==0 and count%200==0:
-
-                if nocrop_real is not None:
-                    nocrop_real_fea = nocrop_real*0.5+0.5
-                    nocrop_real_N = height_to_normal(nocrop_real_fea[:,0:1,:,:])
-                    nocrop_real_fea = torch.cat((2*nocrop_real_N-1,nocrop_real_fea[:,1:4,:,:],nocrop_real_fea[:,4:5,:,:].repeat(1,3,1,1)),dim=1)
-                    # tex_pos = getTexPos(ren_fea.shape[2], size, 'cuda').unsqueeze(0)
-                    nocrop_real_rens = render(nocrop_real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
-
-                self.image_train_saver( self.data['global_pri'], f'{str(count).zfill(6)}pats.png' )   
-                self.image_train_saver( 2*fake_rens-1, f'{str(count).zfill(6)}fake_rens.png' )   
-                self.image_train_saver( 2*real_rens-1, f'{str(count).zfill(6)}real_rens.png' )   
-                self.image_train_saver( 2*nocrop_real_rens-1, f'{str(count).zfill(6)}real_rens_nocrop.png' )   
+            if get_rank()==0 and count%self.args.save_img_freq==0:
+                self.image_train_saver( 2*fake_rens-1, f'{str(count).zfill(6)}_vg_fake_rens.png' )   
+            #     self.image_train_saver( 2*real_rens-1, f'{str(count).zfill(6)}_vg_real_rens.png' )   
 
             vgg_loss = self.get_vgg_loss(self.preVGG(fake_rens), self.preVGG(real_rens)) * self.args.vgg_reg_every * self.args.vgg_regularize
 
@@ -401,16 +409,20 @@ class Trainer():
                 break
 
             self.data = process_data( self.args, next(self.train_loader), self.device )
-            
+
             # forward G  
             output = self.generator(self.data['global_pri'], self.data['color_pri'])
+
             self.fake_img = output['image']
             self.kl_loss = output['klloss']*self.args.kl_lambda
             self.loss_dict['kl'] = self.kl_loss.item()
 
-            # crop if need
-            nocrop_real = self.data['real_img']
 
+            # if get_rank()==0 and count % self.args.save_img_freq == 0:
+            #     self.visualize_train(count, output)
+
+
+            # crop to Discriminator
             if self.args.tile_crop:
                 rand0 = [random.randint(-self.args.scene_size[0]+1, self.fake_img.shape[-1]-1),random.randint(-self.args.scene_size[0]+1, self.fake_img.shape[-1]-1)]
                 self.fake_img = mycrop(self.fake_img, self.fake_img.shape[-1], rand0=rand0)
@@ -435,7 +447,7 @@ class Trainer():
             if count % self.args.g_reg_every == 0:
                 self.regularizePath()
             if self.args.vgg_reg_every != 0 and count % self.args.vgg_reg_every == 0 and self.args.vgg_regularize!=0:
-                self.regularizeVGG(count, rand0, nocrop_real=nocrop_real)
+                self.regularizeVGG(count, rand0)
 
             accum = 0.5 ** (32 / (10 * 1000))
             accumulate(self.g_ema, self.g_module, accum)
@@ -445,10 +457,12 @@ class Trainer():
                     self.write_loss(count)
                 if count % 50 == 0:
                     self.print_loss(count)
-                if count % 200 == 0:
-                    self.visualize(count)  
+                if count % self.args.save_img_freq == 0:
+                    self.visualize(count)
+                    # self.visualize_train(count, output)
                 if count % self.args.ckpt_save_frenquency == 0:  
                     self.save_ckpt(count)
+
 
             if count % self.args.lr_gamma_every ==0 and self.optimizerG.param_groups[0]['lr'] < self.args.lr_limit*self.args.g_reg_every / (self.args.g_reg_every + 1) and count!=0:
                 self.optimizerG.param_groups[0]['lr'] += self.args.lr_gamma
