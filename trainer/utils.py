@@ -129,7 +129,7 @@ class ImageSaver():
         self.normalize = normalize
         self.range = range
 
-    def __call__(self, x, name):
+    def __call__(self, x, name, gamma=False):
         "x: Tensor or PIL.Image. name: a str"
         # print(name, x.shape)
 
@@ -137,7 +137,9 @@ class ImageSaver():
             x = torch.cat([x[:,0:1,:,:].repeat(1,3,1,1), 2*((x[:,1:4,:,:]+1)*0.5)**(1/2.2)-1, x[:,4:5,:,:].repeat(1,3,1,1)],dim=-1)
         elif x.shape[1]==6:
             x = torch.cat([x[:,0:1,:,:].repeat(1,3,1,1), x[:,1:4,:,:], x[:,4:5,:,:].repeat(1,3,1,1), x[:,5:6,:,:].repeat(1,3,1,1)],dim=-1)
-        # print(name, x.shape)
+        else:
+            if gamma:
+                x = 2*((x+1)*0.5)**(1/2.2)-1
 
         save_path = os.path.join(self.base_path, name)
         if type(x) == torch.Tensor: 

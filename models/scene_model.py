@@ -33,8 +33,8 @@ class Generator(nn.Module):
         final_channel = 6 if args.extract_model else 5
 
         self.encoder = Encoder(args, device=self.device)
-        if self.args.color_cond:
-            self.encoder2 = Encoder2(args, device=self.device)
+        # if self.args.color_cond:
+        #     self.encoder2 = Encoder2(args, device=self.device)
 
         self.w_over_h = args.scene_size[1] / args.scene_size[0]
         assert self.w_over_h.is_integer(), 'non supported scene_size'
@@ -88,20 +88,20 @@ class Generator(nn.Module):
     def get_latent(self, input):
         return self.style(input)
 
-    def __prepare_starting_feature(self, global_pri, color_pri, styles, input_type):
-        if self.args.color_cond:
-            feature, _, _ = self.encoder(global_pri)
-            z, loss = self.encoder2(color_pri)
-            if input_type == None:
-                styles = [z]
-                input_type = 'z'
-            return  feature, styles, input_type, loss            
-        else:
-            feature, z, loss = self.encoder(global_pri)
-            if input_type == None:
-                styles = [z]
-                input_type = 'z'
-            return  feature, styles, input_type, loss
+    def __prepare_starting_feature(self, global_pri, styles, input_type):
+        # if self.args.color_cond:
+        #     feature, _, _ = self.encoder(global_pri)
+        #     z, loss = self.encoder2(color_pri)
+        #     if input_type == None:
+        #         styles = [z]
+        #         input_type = 'z'
+        #     return  feature, styles, input_type, loss            
+        # else:
+        feature, z, loss = self.encoder(global_pri)
+        if input_type == None:
+            styles = [z]
+            input_type = 'z'
+        return  feature, styles, input_type, loss
 
     def __prepare_letent(self, styles, inject_index, truncation, truncation_latent,  input_type):
         "This is a private function to prepare w+ space code needed during forward"
@@ -148,7 +148,7 @@ class Generator(nn.Module):
 
         return noise
   
-    def forward(self, global_pri, color_pri, styles=None, return_latents=False, inject_index=None, truncation=1, truncation_latent=None, input_type=None, noise=None, randomize_noise=True, return_loss=True):
+    def forward(self, global_pri, styles=None, return_latents=False, inject_index=None, truncation=1, truncation_latent=None, input_type=None, noise=None, randomize_noise=True, return_loss=True):
 
         """
         global_pri: a tensor with the shape BS*C*self.prior_size*self.prior_size. Here, in background training,
@@ -198,7 +198,7 @@ class Generator(nn.Module):
         else:
             assert False, 'not supported input_type'
 
-        start_feature, styles, input_type, loss = self.__prepare_starting_feature(global_pri, color_pri, styles, input_type)
+        start_feature, styles, input_type, loss = self.__prepare_starting_feature(global_pri, styles, input_type)
         # print( 'starting feature: ',start_feature[0,0,0])
         latent = self.__prepare_letent(styles, inject_index, truncation, truncation_latent, input_type)
         noise = self.__prepare_noise(noise, randomize_noise)
@@ -300,10 +300,11 @@ class Discriminator(nn.Module):
         in_c = 6 if args.extract_model else 5
 
         if args.cond_D:
-            in_c += 1
+            if args.color_cond:
+                in_c += 3
+            else:
+                in_c += 1
 
-        if args.color_cond:
-            in_c += 3
 
         convs = [ ConvLayer(in_c, channels[input_size], 1) ]        
 
@@ -394,7 +395,8 @@ class Encoder(nn.Module):
                      1024: 16 * args.channel_multiplier }
 
         # self.convs1 = ConvLayer(args.number_of_semantic+1, channels[args.scene_size[0]], 1)  # this 1 is edge map
-        in_c = 1 if not args.extract_model else 3
+        in_c = 3 if args.color_cond else 1
+
         self.convs1 = ConvLayer(in_c, channels[args.scene_size[0]], 1)  
 
         log_size = int(math.log(args.scene_size[0], 2))

@@ -62,6 +62,7 @@ if __name__ == "__main__":
     parser.add_argument('--cond_D', action='store_true', help='conditional to z')        
     parser.add_argument('--circular', action='store_true', help='circular padding for all the conv, upsampling and downsampling operations')        
     parser.add_argument('--color_cond', action='store_true', help='add color condition')        
+    parser.add_argument('--debug', action='store_true', help='add color condition')        
     parser.add_argument('--lr_gamma', type=float, default=5e-5, help='add color condition')        
     parser.add_argument('--truncate_z', type=float, default=1.0, help='truncate_z')        
     parser.add_argument('--lr_gamma_every', type=int, default=10000, help='add color condition')        

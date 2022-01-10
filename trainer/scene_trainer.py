@@ -37,7 +37,6 @@ def process_data(args, data, device):
     data = to_device(data, device)
     out = {}
 
-    out['color_pri'] = data['scene_ccond'] if args.color_cond else None
     out['real_img'] = data['scene_img']
     out['global_pri'] = data['scene_sem']
 
@@ -175,19 +174,21 @@ class Trainer():
     def visualize(self, count):
 
         # in_D
-        # self.image_train_saver( self.fake_img.detach(), str(count).zfill(6)+'_D.png' )
-        # self.image_train_saver( self.cond_D, str(count).zfill(6)+'_D_condpat.png' )
-        # self.image_train_saver( self.data['real_img'], str(count).zfill(6)+'_D_realimg.png' )
-        # if self.args.color_cond:
-        #     self.image_train_saver( 2*((self.color_condD+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_D_color.png' )
+        if self.args.debug:
+            self.image_train_saver( self.fake_img.detach(), str(count).zfill(6)+'_D.png' )
+            self.image_train_saver( self.cond_D, str(count).zfill(6)+'_D_condpat.png', gamma=True if self.args.color_cond else False )
+            self.image_train_saver( self.data['real_img'], str(count).zfill(6)+'_D_realimg.png' )
+            # if self.args.color_cond:
+            #     self.image_train_saver( 2*((self.color_condD+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_D_color.png' )
 
         self.prepare_visualization_data()       
         with torch.no_grad():  
             ### in training sets
-            output = self.g_ema( self.train_sample['global_pri'], self.train_sample['color_pri'] )
-            self.image_train_saver( self.train_sample['global_pri'] , str(count).zfill(6)+'_eval_pat.png' )
+            output = self.g_ema( self.train_sample['global_pri'])
+            self.image_train_saver( self.train_sample['global_pri'] , str(count).zfill(6)+'_eval_pat.png', gamma=True if self.args.color_cond else False )
             self.image_train_saver( self.train_sample['real_img'] , str(count).zfill(6)+'_eval_real.png' )
-            # self.image_train_saver( output['image'] , str(count).zfill(6)+'_eval.png' )
+            if self.args.debug:
+                self.image_train_saver( output['image'] , str(count).zfill(6)+'_eval.png' )
             self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_eval_tile.png' ) # save tiled image
 
             # save rendered image
@@ -214,29 +215,29 @@ class Trainer():
                 self.image_train_saver( 2*real_rens-1, f'{str(count).zfill(6)}_eval_real_rens.png' )   
 
             ### in testing sets
-            output = self.g_ema( self.test_sample['global_pri'], self.train_sample['color_pri'] )     
-            self.image_test_saver( self.test_sample['global_pri'] , str(count).zfill(6)+'_eval_pat.png' )
+            output = self.g_ema( self.test_sample['global_pri'])     
+            self.image_test_saver( self.test_sample['global_pri'] , str(count).zfill(6)+'_eval_pat.png', gamma=True if self.args.color_cond else False  )
             self.image_test_saver( self.test_sample['real_img'] , str(count).zfill(6)+'_eval_real.png' )
             # self.image_test_saver( output['image'] , str(count).zfill(6)+'_eval.png' )
             self.image_test_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_eval_tile.png' ) # save tiled image
 
             # fix style keep changing patterns
             if self.args.nocond_z:
-                output = self.g_ema( self.train_sample['global_pri'], self.train_sample['color_pri'], styles=[self.fix_z], input_type='z' )    
+                output = self.g_ema( self.train_sample['global_pri'], styles=[self.fix_z], input_type='z' )    
                 # self.image_train_saver( output['image'] , str(count).zfill(6)+'_eval_fix.png' )
                 self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_eval_fix_tile.png' ) # save tiled image
 
-            if self.args.color_cond:
-                self.image_train_saver( 2*((self.train_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_eval_color.png' )
-                self.image_test_saver( 2*((self.test_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_eval_color.png' )
+            # if self.args.color_cond:
+            #     self.image_train_saver( 2*((self.train_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_eval_color.png' )
+            #     self.image_test_saver( 2*((self.test_sample['color_pri']+1)*0.5)**(1/2.2)-1 , str(count).zfill(6)+'_eval_color.png' )
 
     def visualize_train(self, count, output):
 
         # tr
-        self.image_train_saver( self.data['global_pri'] , str(count).zfill(6)+'_tr_pat.png' )
+        self.image_train_saver( self.data['global_pri'] , str(count).zfill(6)+'_tr_pat.png', gamma=True if self.args.color_cond else False  )
         self.image_train_saver( self.data['real_img'] , str(count).zfill(6)+'_tr_img.png' )
-        if self.args.color_cond:
-            self.image_train_saver( self.data['color_pri'] , str(count).zfill(6)+'_tr_color.png' )
+        # if self.args.color_cond:
+        #     self.image_train_saver( self.data['color_pri'] , str(count).zfill(6)+'_tr_color.png' )
         self.image_train_saver( output['image'] , str(count).zfill(6)+'_tr.png' )
         self.image_train_saver( torch.tile(output['image'], (1,1,2,2)), str(count).zfill(6)+'_tr_tile.png' ) # save tiled image
 
@@ -267,9 +268,9 @@ class Trainer():
             augmented_fake_img = torch.cat([augmented_fake_img, self.cond_D], dim=1)
             augmented_real_img = torch.cat([augmented_real_img, self.cond_D], dim=1)
 
-        if self.args.color_cond:
-            augmented_fake_img = torch.cat([augmented_fake_img, self.color_condD], dim=1)
-            augmented_real_img = torch.cat([augmented_real_img, self.color_condD], dim=1)
+        # if self.args.color_cond:
+        #     augmented_fake_img = torch.cat([augmented_fake_img, self.color_condD], dim=1)
+        #     augmented_real_img = torch.cat([augmented_real_img, self.color_condD], dim=1)
 
 
         real_pred = self.netD(augmented_real_img)
@@ -290,8 +291,8 @@ class Trainer():
 
         if self.args.cond_D:
             augmented_fake_img = torch.cat([augmented_fake_img, self.cond_D], dim=1)
-        if self.args.color_cond:
-            augmented_fake_img = torch.cat([augmented_fake_img, self.color_condD], dim=1)
+        # if self.args.color_cond:
+        #     augmented_fake_img = torch.cat([augmented_fake_img, self.color_condD], dim=1)
 
         fake_pred = self.netD(augmented_fake_img)
         g_loss = g_nonsaturating_loss(fake_pred)
@@ -309,8 +310,8 @@ class Trainer():
 
         in_D = torch.cat([self.data['real_img'], self.cond_D], dim=1) if self.args.cond_D else self.data['real_img']
 
-        if self.args.color_cond:
-            in_D = torch.cat([in_D, self.color_condD], dim=1)
+        # if self.args.color_cond:
+        #     in_D = torch.cat([in_D, self.color_condD], dim=1)
 
         real_pred = self.netD(in_D)
 
@@ -324,7 +325,7 @@ class Trainer():
        
     def regularizePath(self):
 
-        output = self.generator(self.data['global_pri'], self.data['color_pri'], return_latents=True, return_loss=False)
+        output = self.generator(self.data['global_pri'], return_latents=True, return_loss=False)
         fake_img = output['image']
         latents = output['latent']
 
@@ -343,7 +344,7 @@ class Trainer():
 
     def regularizeVGG(self, count, rand0=None, nocrop_real=None):
         randomize_noise = not self.args.vgg_fix_noise
-        output = self.generator(self.data['global_pri'], self.data['color_pri'], return_loss=False, randomize_noise=randomize_noise)
+        output = self.generator(self.data['global_pri'], return_loss=False, randomize_noise=randomize_noise)
         fake_img = output['image']
 
         if self.args.tile_crop:
@@ -411,15 +412,15 @@ class Trainer():
             self.data = process_data( self.args, next(self.train_loader), self.device )
 
             # forward G  
-            output = self.generator(self.data['global_pri'], self.data['color_pri'])
+            output = self.generator(self.data['global_pri'])
 
             self.fake_img = output['image']
             self.kl_loss = output['klloss']*self.args.kl_lambda
             self.loss_dict['kl'] = self.kl_loss.item()
 
 
-            # if get_rank()==0 and count % self.args.save_img_freq == 0:
-            #     self.visualize_train(count, output)
+            if get_rank()==0 and count % self.args.save_img_freq == 0 and self.args.debug:
+                self.visualize_train(count, output)
 
 
             # crop to Discriminator
@@ -431,8 +432,8 @@ class Trainer():
                 if self.args.cond_D:
                     self.cond_D = mycrop(self.data['global_pri'], self.fake_img.shape[-1], rand0=rand0)
 
-                if self.args.color_cond:
-                    self.color_condD = mycrop(self.data['color_pri'], self.fake_img.shape[-1], rand0=rand0)
+                # if self.args.color_cond:
+                #     self.color_condD = mycrop(self.data['color_pri'], self.fake_img.shape[-1], rand0=rand0)
 
             else:
                 rand0=None

@@ -44,8 +44,8 @@ PATH_TO_DATASET:
 
 
 class SceneConfig():
-    TRAIN_DATASETS = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/BricksDataset_pat2_train']
-    TEST_DATASETS = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/BricksDataset_pat2_val']
+    TRAIN_DATASETS = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/BricksDataset_pat2_train_color']
+    TEST_DATASETS = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/BricksDataset_pat2_val_color']
 
     # TRAIN_DATASETS = ['/home/code-base/scratch_space/Server/data/ade_bedroom']
     # TEST_DATASETS = ['/home/code-base/scratch_space/Server/data/ade_bedroom'] 

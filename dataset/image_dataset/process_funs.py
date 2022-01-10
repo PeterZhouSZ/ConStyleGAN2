@@ -52,16 +52,25 @@ def get_scene_data(args, img, composition=None):
 
     # data augmentation
     if args.aug_data:
-        color_jitter = transforms.Compose([transforms.ToPILImage(), transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.5, hue=0.5), transforms.ToTensor()])
-        D = color_jitter(full_img[:,:,h:2*h]).cuda()
+        # color_jitter = transforms.Compose([transforms.ToPILImage(), transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.5, hue=0.5), transforms.ToTensor()])
+        # D = color_jitter(full_img[:,:,h:2*h]).cuda()
+
+        gamma_hue = random.random()-0.5 # [0.8~1.2]
+        D = TF.adjust_hue(full_img[:,:,h:2*h], gamma_hue)
+
         gamma = 0.8+random.random()*0.4 # [0.8~1.2]
         H = full_img[0:1,:,0:h]**gamma
         R = full_img[0:1,:,2*h:3*h]**gamma
 
         scene_img = torch.cat([H, D, R], dim=0)
-        scene_sem = full_img[0:1,:,3*h:4*h]
-        
 
+        if args.color_cond:
+            # scene_sem = full_img[0:1,:,4*h:5*h]
+            # scene_sem = color_jitter(full_img[:,:,4*h:5*h]).cuda()
+            scene_sem = TF.adjust_hue(full_img[:,:,4*h:5*h], gamma_hue)
+        else:
+            scene_sem = full_img[0:1,:,3*h:4*h]
+        
         rand0 = [random.randint(-args.scene_size[0]+1, D.shape[-1]-1),random.randint(-args.scene_size[0]+1, D.shape[-1]-1)]
 
         # randomly crop
@@ -79,48 +88,30 @@ def get_scene_data(args, img, composition=None):
     # extract conditional mask
     out = {}
 
-    if args.extract_model:
+    # if args.extract_model:
 
-        # rendered image as semantic image
-        light, light_pos, size = set_param('cuda')
-        real_N = height_to_normal(H.unsqueeze(0))
-        real_fea = torch.cat((2*real_N-1, D.unsqueeze(0), R.unsqueeze(0).repeat(1,3,1,1)), dim=1)
-        tex_pos = getTexPos(real_fea.shape[2], size, 'cuda').unsqueeze(0)
-        real_rens = render(real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
-        # print('real_rens: ',real_rens.shape)
+    #     # rendered image as semantic image
+    #     light, light_pos, size = set_param('cuda')
+    #     real_N = height_to_normal(H.unsqueeze(0))
+    #     real_fea = torch.cat((2*real_N-1, D.unsqueeze(0), R.unsqueeze(0).repeat(1,3,1,1)), dim=1)
+    #     tex_pos = getTexPos(real_fea.shape[2], size, 'cuda').unsqueeze(0)
+    #     real_rens = render(real_fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
+    #     # print('real_rens: ',real_rens.shape)
 
-        # center crop 256 of 512
-        scene_sem = mycrop(real_rens, 256, center=True)
-        if scene_sem.dim()==4:
-            scene_sem = scene_sem[0,...]
-        # print('scene_sem: ',scene_sem.shape)
-        out['scene_sem'] = 2*scene_sem-1
+    #     # center crop 256 of 512
+    #     scene_sem = mycrop(real_rens, 256, center=True)
+    #     if scene_sem.dim()==4:
+    #         scene_sem = scene_sem[0,...]
+    #     # print('scene_sem: ',scene_sem.shape)
+    #     out['scene_sem'] = 2*scene_sem-1
 
-        # real image include H,D,R,Pat
-        scene_img = torch.cat([scene_img, full_img[0:1,:,3*h:4*h]], dim=0)
+    #     # real image include H,D,R,Pat
+    #     scene_img = torch.cat([scene_img, full_img[0:1,:,3*h:4*h]], dim=0)
 
-    else:
-
-        if args.color_cond:
-            tile_color = scene_sem*D
-            tile_mean = tile_color.sum((-2,-1),keepdim=True)/scene_sem.sum((-2,-1),keepdim=True)
-
-            grout_color = (1-scene_sem)*D
-            grout_mean = grout_color.sum((-2,-1),keepdim=True)/scene_sem.sum((-2,-1),keepdim=True)
-
-            total_color = tile_mean*scene_sem + grout_mean*(1-scene_sem)
-
-            # print('total color shape:', total_color.shape)
-            out['scene_ccond'] = 2*total_color-1
-
-        out['scene_sem'] = 2*scene_sem-1
+    out['scene_sem'] = 2*scene_sem-1
 
     out['scene_img'] = 2*scene_img-1
 
-    # out[]
-    # out['scene_ins'] = scene_ins
-    # if composition != None:
-    #     out['composition'] = composition
     return out
 
 
