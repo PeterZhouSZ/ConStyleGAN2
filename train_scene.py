@@ -65,7 +65,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='add color condition')        
     parser.add_argument('--lr_gamma', type=float, default=5e-5, help='add color condition')        
     parser.add_argument('--truncate_z', type=float, default=1.0, help='truncate_z')        
-    parser.add_argument('--lr_gamma_every', type=int, default=10000, help='add color condition')        
+    parser.add_argument('--lr_gamma_every', type=int, default=5000, help='add color condition')        
     parser.add_argument('--lr_limit', type=float, default=0.0008, help='lr limit')        
 
     args = parser.parse_args()
