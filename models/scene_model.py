@@ -202,8 +202,9 @@ class Generator(nn.Module):
         # print( 'starting feature: ',start_feature[0,0,0])
         latent = self.__prepare_letent(styles, inject_index, truncation, truncation_latent, input_type)
         noise = self.__prepare_noise(noise, randomize_noise)
-    
-        # print('noise ', noise)
+        
+        if noise[0] is not None:
+            print('noise ', noise[0][0,0,5,5])
         # # # start generating # # #  
 
         out = start_feature

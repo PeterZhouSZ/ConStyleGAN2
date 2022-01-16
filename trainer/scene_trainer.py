@@ -390,10 +390,13 @@ class Trainer():
     def regularize_style(self, count):
 
         # random produce one style
+        # random_noise = self.args.random_noise_style
         fix_z = torch.randn( self.args.batch_size, self.args.style_dim, device=self.device)
+        # if get_rank()==0:
+        fix_noise = self.generator.module.make_noise()
 
         w = self.data['global_pri'].shape[-1]
-        output1 = self.generator(self.data['global_pri'], styles=[fix_z], input_type='z' ,return_loss=False, randomize_noise=False)['image']
+        output1 = self.generator(self.data['global_pri'], styles=[fix_z], noise=fix_noise, input_type='z' ,return_loss=False )['image']
 
         rand1 = [random.randint(1,w-1), random.randint(1,w-1)]
         print('rand1: ', rand1)
@@ -402,7 +405,7 @@ class Trainer():
 
         crop_pat = mycrop(self.data['global_pri'], w, rand0=rand1)
 
-        output2 = self.generator(crop_pat, styles=[fix_z], input_type='z' ,return_loss=False, randomize_noise=False)['image']
+        output2 = self.generator(crop_pat, styles=[fix_z], noise=fix_noise, input_type='z' ,return_loss=False)['image']
 
         re_output2 = mycrop(output2, w, rand0=reverse_rand1)
         crop_pat2 = mycrop(crop_pat, w, rand0=reverse_rand1)
@@ -425,6 +428,10 @@ class Trainer():
             rens2 = render(fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
 
             if get_rank()==0 and count%self.args.save_img_freq==0:
+
+                self.image_train_saver( output1 , str(count).zfill(6)+'_fea1.png' )
+                self.image_train_saver( re_output2, str(count).zfill(6)+'_fea2.png' )
+
                 self.image_train_saver( 2*rens1-1, f'{str(count).zfill(6)}_rens1.png' )   
                 self.image_train_saver( 2*self.data['global_pri']-1, f'{str(count).zfill(6)}_pat0.png' )   
                 self.image_train_saver( 2*crop_pat-1, f'{str(count).zfill(6)}_pat1.png' )   
@@ -432,8 +439,9 @@ class Trainer():
                 self.image_train_saver( 2*crop_pat2-1, f'{str(count).zfill(6)}_pat2.png' )   
 
             style_loss = self.get_vggnogt_loss(self.preVGG(rens1), self.preVGG(rens2)) * self.args.style_reg_every * self.args.style_regularize
-            # style_loss = self.MSELoss(rens1, rens2) * self.args.style_reg_every * self.args.style_regularize
+            # style_fea_loss = self.MSELoss(output1, re_output2) * self.args.style_reg_every * self.args.style_regularize
 
+            # style_loss = (style_ren_loss+style_fea_loss)*0.5
 
         self.loss_dict['style_loss'] = style_loss.item()
 
