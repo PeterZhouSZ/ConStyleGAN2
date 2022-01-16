@@ -37,6 +37,7 @@ if __name__ == "__main__":
     parser.add_argument("--r1", type=float, default=10, help='loss weight for r1 regularization')
     parser.add_argument("--path_regularize", type=float, default=2, help='loss weight for path regularization')
     parser.add_argument("--vgg_regularize", type=float, default=1, help='loss weight for vgg regularization')
+    parser.add_argument("--style_regularize", type=float, default=1, help='loss weight for style regularization')
    
     # Training related
     parser.add_argument("--local_rank", type=int, default=0)
@@ -54,6 +55,7 @@ if __name__ == "__main__":
     parser.add_argument("--d_reg_every", type=int, default=16, help='perform r1 regularization for every how many steps')
     parser.add_argument("--g_reg_every", type=int, default=4, help='perform path regularization for every how many steps')
     parser.add_argument("--vgg_reg_every", type=int, default=4, help='perform vgg regularization for every how many steps, if 0 then no vgg loss')
+    parser.add_argument("--style_reg_every", type=int, default=4, help='perform style regularization for every how many steps, if 0 then no vgg loss')
     parser.add_argument("--vgg_fix_noise", type=bool, default=True, help='noise will be fixed when perform vgg loss')
     parser.add_argument('--aug_data', action='store_true', help='data augmentation')        
     parser.add_argument('--extract_model', action='store_true', help='extract model of tileable patterns from target images')        
@@ -65,7 +67,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='add color condition')        
     parser.add_argument('--lr_gamma', type=float, default=5e-5, help='add color condition')        
     parser.add_argument('--truncate_z', type=float, default=1.0, help='truncate_z')        
-    parser.add_argument('--lr_gamma_every', type=int, default=5000, help='add color condition')        
+    parser.add_argument('--lr_gamma_every', type=int, default=10000, help='add color condition')        
     parser.add_argument('--lr_limit', type=float, default=0.0008, help='lr limit')        
 
     args = parser.parse_args()

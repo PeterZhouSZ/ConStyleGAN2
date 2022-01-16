@@ -28,6 +28,27 @@ class VGGLoss(nn.Module):
         return loss
 
 
+class VGGLoss_nogt(nn.Module):
+    def __init__(self):
+        super(VGGLoss_nogt, self).__init__()
+        self.vgg = VGG19().cuda()
+        self.criterion = L1_loss()
+        self.weights = [1.0 / 32, 1.0 / 16, 1.0 / 8, 1.0 / 4, 1.0]
+        print('please make sure the second input is target in VGGloss')
+        
+    def forward(self, x, y, mask=None):
+        x_vgg, y_vgg = self.vgg(x), self.vgg(y)
+
+        loss = 0
+        for i in range(len(x_vgg)):
+            if mask is None:
+                matched_mask = None
+            else:
+                h, w  = x_vgg[i].shape[2], x_vgg[i].shape[3]
+                matched_mask = F.interpolate(mask, size=(h,w) )
+            loss += self.weights[i] * self.criterion( x_vgg[i], y_vgg[i], matched_mask )
+        return loss
+
 
 
 class VGG19(torch.nn.Module):

@@ -13,7 +13,7 @@ from misc.DiffAugment import DiffAugment
 
 from trainer.utils import sample_data, ImageSaver, accumulate, sample_n_data, to_device, CheckpointSaver, mycrop
 from criteria.gan import g_nonsaturating_loss, d_logistic_loss, g_path_regularize, d_r1_loss
-from criteria.vgg import VGGLoss
+from criteria.vgg import VGGLoss, VGGLoss_nogt
 from distributed import get_rank, synchronize, reduce_loss_dict, reduce_sum, get_world_size     
 import time
 
@@ -68,7 +68,9 @@ class Trainer():
         self.prepare_optimizer()
         self.prepare_dataloader()
         self.get_vgg_loss = VGGLoss()
+        self.get_vggnogt_loss = VGGLoss_nogt()
         self.loss_dict = {}
+        self.MSELoss = torch.nn.MSELoss()
 
         if self.args.ckpt:
             self.load_ckpt()  
@@ -384,7 +386,62 @@ class Trainer():
         self.optimizerG.zero_grad()
         vgg_loss.backward()
         self.optimizerG.step()
+
+    def regularize_style(self, count):
+
+        # random produce one style
+        fix_z = torch.randn( self.args.batch_size, self.args.style_dim, device=self.device)
+
+        w = self.data['global_pri'].shape[-1]
+        output1 = self.generator(self.data['global_pri'], styles=[fix_z], input_type='z' ,return_loss=False, randomize_noise=False)['image']
+
+        rand1 = [random.randint(1,w-1), random.randint(1,w-1)]
+        print('rand1: ', rand1)
+        reverse_rand1 = [w-rand1[0],w-rand1[1]]
+        print('reverse_rand1: ', reverse_rand1)
+
+        crop_pat = mycrop(self.data['global_pri'], w, rand0=rand1)
+
+        output2 = self.generator(crop_pat, styles=[fix_z], input_type='z' ,return_loss=False, randomize_noise=False)['image']
+
+        re_output2 = mycrop(output2, w, rand0=reverse_rand1)
+        crop_pat2 = mycrop(crop_pat, w, rand0=reverse_rand1)
+
+        # rerender if necessary
+        if output2.shape[1] == 5:
+            output1_vgg = output1*0.5+0.5
+            re_output2_vgg = re_output2*0.5+0.5
+
+            light, light_pos, size = set_param('cuda')
+
+            N = height_to_normal(output1_vgg[:,0:1,:,:])
+            fea = torch.cat((2*N-1,output1_vgg[:,1:4,:,:],output1_vgg[:,4:5,:,:].repeat(1,3,1,1)),dim=1)
+            tex_pos = getTexPos(fea.shape[2], size, 'cuda').unsqueeze(0)
+            rens1 = render(fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
+
+            N = height_to_normal(re_output2_vgg[:,0:1,:,:])
+            fea = torch.cat((2*N-1,re_output2_vgg[:,1:4,:,:],re_output2_vgg[:,4:5,:,:].repeat(1,3,1,1)),dim=1)
+            # tex_pos = getTexPos(ren_fea.shape[2], size, 'cuda').unsqueeze(0)
+            rens2 = render(fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
+
+            if get_rank()==0 and count%self.args.save_img_freq==0:
+                self.image_train_saver( 2*rens1-1, f'{str(count).zfill(6)}_rens1.png' )   
+                self.image_train_saver( 2*self.data['global_pri']-1, f'{str(count).zfill(6)}_pat0.png' )   
+                self.image_train_saver( 2*crop_pat-1, f'{str(count).zfill(6)}_pat1.png' )   
+                self.image_train_saver( 2*rens2-1, f'{str(count).zfill(6)}_rens2.png' )   
+                self.image_train_saver( 2*crop_pat2-1, f'{str(count).zfill(6)}_pat2.png' )   
+
+            style_loss = self.get_vggnogt_loss(self.preVGG(rens1), self.preVGG(rens2)) * self.args.style_reg_every * self.args.style_regularize
+            # style_loss = self.MSELoss(rens1, rens2) * self.args.style_reg_every * self.args.style_regularize
+
+
+        self.loss_dict['style_loss'] = style_loss.item()
+
+        self.optimizerG.zero_grad()
+        style_loss.backward()
+        self.optimizerG.step()
    
+    
    
     def train(self):
         "Note that in dist training printed and saved losses are not reduced, but from the first process"
@@ -449,6 +506,9 @@ class Trainer():
                 self.regularizePath()
             if self.args.vgg_reg_every != 0 and count % self.args.vgg_reg_every == 0 and self.args.vgg_regularize!=0:
                 self.regularizeVGG(count, rand0)
+            if self.args.style_reg_every != 0 and count % self.args.style_reg_every == 0 and self.args.style_regularize!=0:
+                self.regularize_style(count)
+
 
             accum = 0.5 ** (32 / (10 * 1000))
             accumulate(self.g_ema, self.g_module, accum)

@@ -24,11 +24,11 @@ class Generator(nn.Module):
                             8: 512,
                             16: 512,
                             32: 512,
-                            64: 256 * args.channel_multiplier,
-                            128: 128 * args.channel_multiplier,
-                            256: 64 * args.channel_multiplier,
-                            512: 32 * args.channel_multiplier,
-                            1024: 16 * args.channel_multiplier }
+                            64: int(256 * args.channel_multiplier),
+                            128: int(128 * args.channel_multiplier),
+                            256: int(64 * args.channel_multiplier),
+                            512: int(32 * args.channel_multiplier),
+                            1024: int(16 * args.channel_multiplier) }
 
         final_channel = 6 if args.extract_model else 5
 
@@ -389,10 +389,10 @@ class Encoder(nn.Module):
                      16: 512,
                      32: 512,
                      64: 512,
-                     128: 128 * args.channel_multiplier,
-                     256: 64 * args.channel_multiplier,
-                     512: 32 * args.channel_multiplier,
-                     1024: 16 * args.channel_multiplier }
+                     128: int(128 * args.channel_multiplier),
+                     256: int(64 * args.channel_multiplier),
+                     512: int(32 * args.channel_multiplier),
+                     1024: int(16 * args.channel_multiplier) }
 
         # self.convs1 = ConvLayer(args.number_of_semantic+1, channels[args.scene_size[0]], 1)  # this 1 is edge map
         in_c = 3 if args.color_cond else 1
