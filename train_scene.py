@@ -70,6 +70,10 @@ if __name__ == "__main__":
     parser.add_argument('--lr_gamma_every', type=int, default=10000, help='add color condition')        
     parser.add_argument('--lr_limit', type=float, default=0.0008, help='lr limit')        
 
+    parser.add_argument('--shiftN', action='store_true', help='use shift noise or not')        
+
+    parser.add_argument('--dk_size', type=int, default=3, help='downsample kernel size')        
+
     args = parser.parse_args()
     
     assert args.augment == False, 'augmentation is never tested. Not sure if it works...'

@@ -148,7 +148,7 @@ class Generator(nn.Module):
 
         return noise
   
-    def forward(self, global_pri, styles=None, return_latents=False, inject_index=None, truncation=1, truncation_latent=None, input_type=None, noise=None, randomize_noise=True, return_loss=True):
+    def forward(self, global_pri, styles=None, return_latents=False, inject_index=None, truncation=1, truncation_latent=None, input_type=None, noise=None, randomize_noise=True, return_loss=True, shiftN=None):
 
         """
         global_pri: a tensor with the shape BS*C*self.prior_size*self.prior_size. Here, in background training,
@@ -203,8 +203,13 @@ class Generator(nn.Module):
         latent = self.__prepare_letent(styles, inject_index, truncation, truncation_latent, input_type)
         noise = self.__prepare_noise(noise, randomize_noise)
         
+        if shiftN is not None:
+            print('shift noise')
+
         if noise[0] is not None:
             print('noise ', noise[0][0,0,5,5])
+        # else:
+        #     print('noise is none')
         # # # start generating # # #  
 
         out = start_feature
@@ -213,9 +218,9 @@ class Generator(nn.Module):
         i = 0
         for conv1, conv2, noise1, noise2, to_rgb in zip( self.convs[::2], self.convs[1::2], noise[::2], noise[1::2], self.to_rgbs ):
             # print('out: ',out.shape)
-            out = conv1(out, latent[:, i], noise=noise1)  
+            out = conv1(out, latent[:, i], noise=noise1, shiftN=shiftN)  
             # print('out: ',out[0,0, 20, 20:25])
-            out = conv2(out, latent[:, i + 1], noise=noise2)   
+            out = conv2(out, latent[:, i + 1], noise=noise2, shiftN=shiftN)   
             # print('out: ',out[0,0, 20, 20:25])
             skip = to_rgb(out, latent[:, i + 2], skip)
             # print('skip: ',skip[0, 0, 20, 20:25])
@@ -313,7 +318,7 @@ class Discriminator(nn.Module):
 
         for i in range(log_size, 2, -1):
             out_channel = channels[2 ** (i - 1)]
-            convs.append(ResBlock(in_channel, out_channel, blur_kernel, circular = self.args.circular))
+            convs.append(ResBlock(in_channel, out_channel, blur_kernel, circular = self.args.circular, dk_size=self.args.dk_size))
             in_channel = out_channel
 
         self.convs = nn.Sequential(*convs)
@@ -410,7 +415,7 @@ class Encoder(nn.Module):
             out_channel = channels[ out_size ]
             if 4 <= out_size <= args.starting_height_size: 
                 size_to_channel[out_size] = out_channel 
-            self.convs2.append(ResBlock(in_channel, out_channel, blur_kernel, circular=self.args.circular))
+            self.convs2.append(ResBlock(in_channel, out_channel, blur_kernel, circular=self.args.circular, dk_size=self.args.dk_size))
             in_channel = out_channel
 
         self.unet = SmallUnet( size_to_channel, circular=self.args.circular )
@@ -468,77 +473,4 @@ class Encoder(nn.Module):
             # print('z ',z.shape)
 
         return starting_feature, z, loss
-
-
-class Encoder2(nn.Module):
-    def __init__(self, args, device ,blur_kernel=[1, 3, 3, 1]):
-        super().__init__()
-        self.args = args
-
-        self.device = device
-        channels = { 4: 512,
-                     8: 512,
-                     16: 512,
-                     32: 512,
-                     64: 512,
-                     128: 128 * args.channel_multiplier,
-                     256: 64 * args.channel_multiplier,
-                     512: 32 * args.channel_multiplier,
-                     1024: 16 * args.channel_multiplier }
-
-        # self.convs1 = ConvLayer(args.number_of_semantic+1, channels[args.scene_size[0]], 1)  # this 1 is edge map
-        in_c = 3
-        self.convs1 = ConvLayer(in_c, channels[args.scene_size[0]], 1)  
-
-        log_size = int(math.log(args.scene_size[0], 2))
-
-        in_channel = channels[args.scene_size[0]]
-        size_to_channel = {} # indicate from which resolution we provide spatial feature 
-        self.convs2 = nn.ModuleList()
-        for i in range(log_size, 2, -1):
-            out_size = 2 ** (i-1)
-            out_channel = channels[ out_size ]
-            if 4 <= out_size <= args.starting_height_size: 
-                size_to_channel[out_size] = out_channel 
-            self.convs2.append(ResBlock(in_channel, out_channel, blur_kernel, circular=self.args.circular))
-            in_channel = out_channel
-
-        w_over_h = args.scene_size[1] / args.scene_size[0]
-        assert w_over_h.is_integer(), 'non supported scene_size'
-
-        self.final_linear = EqualLinear(channels[4] * 4 * 4 * int(w_over_h), channels[4], activation='fused_lrelu')
-        self.mu_linear = EqualLinear(channels[4], int(args.style_dim*0.5))
-        self.var_linear = EqualLinear(channels[4], int(args.style_dim*0.5))
-
-
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)         
-        return eps.mul(std) + mu
-    
-
-    def get_kl_loss(self, mu, logvar):
-        return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-
-
-    def forward(self, input):
-        batch = input.shape[0]
-        intermediate_feature = []
-        # print('input: ',input.shape)
-        out = self.convs1(input)
-        # print('out: ',out.shape)
-        for conv in self.convs2:
-            out = conv(out)
-
-        out = self.final_linear( out.view(batch, -1))
-        mu = self.mu_linear(out)
-        logvar = self.var_linear(out)
-
-        z1 = self.reparameterize(mu, logvar)
-        z2 = torch.randn(z1.shape[0], int(self.args.style_dim*0.5), device=self.device)
-
-        loss = self.get_kl_loss(mu, logvar)
-        z = torch.cat([z1,z2], dim=-1)
-
-        return z, loss
 

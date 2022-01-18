@@ -3,10 +3,12 @@ import random
 import torch
 from torch import nn
 from torch.nn import functional as F
-
+import numpy as np
+import scipy.ndimage
 
 from models.stylegan2.op import FusedLeakyReLU, fused_leaky_relu, upfirdn2d
 
+from trainer.utils import mycrop
 
 class PixelNorm(nn.Module):
     def __init__(self):
@@ -132,8 +134,14 @@ class EqualConv2d(nn.Module):
 
         self.circular = circular
         self.downsample = downsample
+        self.kernel_size = kernel_size
+
         self.stride = stride
         self.padding = padding
+
+        # adjust padding for kernel size 4
+        if kernel_size==4:
+            self.padding = int(padding/2)
 
         if bias:
             self.bias = nn.Parameter(torch.zeros(out_channel))
@@ -142,8 +150,11 @@ class EqualConv2d(nn.Module):
 
     def forward(self, input):
         if self.circular:
+            # print('1:', input.shape)
             input = F.pad(input, (self.padding,self.padding,self.padding,self.padding), mode ='circular')
+            # print('2:', input.shape)
             out = F.conv2d(input, self.weight*self.scale, bias=self.bias, stride=self.stride)
+            # print('3:', out.shape)
         else:
             out = F.conv2d(input, self.weight*self.scale, bias=self.bias, stride=self.stride, padding=self.padding)
         return out
@@ -354,11 +365,51 @@ class NoiseInjection(nn.Module):
         super().__init__()
         self.weight = nn.Parameter(torch.zeros(1))
 
-    def forward(self, image, noise=None):
+    def forward(self, image, noise=None, shiftN=None):
 
         if noise is None:
             batch, _, height, width = image.shape
             noise = image.new_empty(batch, 1, height, width).normal_()
+
+        # shift noise if needed
+        if shiftN is not None:
+
+            size = noise.shape[-1]
+
+            shiftX = shiftN[0]
+            shiftY = shiftN[1]
+
+            scaled_shiftX = shiftX/noise.shape[-1]
+            scaled_shiftY = shiftY/noise.shape[-1]
+
+            scaled_shiftX_int = int(np.modf(scaled_shiftX)[1])
+            scaled_shiftX_frac = np.modf(scaled_shiftX)[0]
+            scaled_shiftY_int = int(np.modf(scaled_shiftY)[1])
+            scaled_shiftY_frac = np.modf(scaled_shiftY)[0]
+
+            # shift the interger part
+            noise = mycrop(noise, size, rand0=[scaled_shiftX_int, scaled_shiftY_int])
+
+            # dealing with subpixel
+            noise = F.pad(noise, (1,1,1,1), mode='circular')
+
+            # print('noise shape：', noise.shape)
+            scaled_shiftX_frac = scaled_shiftX_frac*2/(size+1)
+            scaled_shiftY_frac = scaled_shiftY_frac*2/(size+1)
+
+            dX = torch.linspace(-1+2/(size+1)-shiftY, 1-2/(size+1)-shiftY, size)
+            dY = torch.linspace(-1+2/(size+1)-shiftX, 1-2/(size+1)-shiftX, size)
+
+            meshx, meshy = torch.meshgrid((dX, dY))
+            grid = torch.stack((meshy, meshx), 2)
+            grid = grid.unsqueeze(0).cuda() # add batch dim
+
+
+            noise = torch.nn.functional.grid_sample(noise, grid, align_corners=True)
+
+            # print('shifted noise shape：', noise.shape)
+
+
 
         return image + self.weight * noise
 
@@ -385,10 +436,10 @@ class StyledConv(nn.Module):
         # self.activate = ScaledLeakyReLU(0.2)
         self.activate = FusedLeakyReLU(out_channel)
 
-    def forward(self, input, style, noise=None):
+    def forward(self, input, style, noise=None, shiftN=None):
         out = self.conv(input, style)
         # print('out no noise: ', out[0,0,0,0:10])
-        out = self.noise(out, noise=noise)
+        out = self.noise(out, noise=noise, shiftN=shiftN)
         # print('out noise: ', out[0,0,0,0:10])
 
         # out = out + self.bias
@@ -521,12 +572,12 @@ class ConvLayer(nn.Sequential):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channel, out_channel, blur_kernel=[1, 3, 3, 1], circular=False):
+    def __init__(self, in_channel, out_channel, blur_kernel=[1, 3, 3, 1], circular=False, dk_size=3):
         super().__init__()
         # print('conv1')
         self.conv1 = ConvLayer(in_channel, in_channel, 3, circular=circular)
         # print('conv2')
-        self.conv2 = ConvLayer(in_channel, out_channel, 3, downsample=True, circular=circular)
+        self.conv2 = ConvLayer(in_channel, out_channel, dk_size, downsample=True, circular=circular)
         # print('skip')
         self.skip = ConvLayer( in_channel, out_channel, 1, downsample=True, activate=False, bias=False, circular=circular)
 

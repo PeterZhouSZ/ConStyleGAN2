@@ -399,13 +399,15 @@ class Trainer():
         output1 = self.generator(self.data['global_pri'], styles=[fix_z], noise=fix_noise, input_type='z' ,return_loss=False )['image']
 
         rand1 = [random.randint(1,w-1), random.randint(1,w-1)]
+
+        shiftN=rand1 if self.args.shiftN else None
         print('rand1: ', rand1)
         reverse_rand1 = [w-rand1[0],w-rand1[1]]
         print('reverse_rand1: ', reverse_rand1)
 
         crop_pat = mycrop(self.data['global_pri'], w, rand0=rand1)
 
-        output2 = self.generator(crop_pat, styles=[fix_z], noise=fix_noise, input_type='z' ,return_loss=False)['image']
+        output2 = self.generator(crop_pat, styles=[fix_z], noise=fix_noise, input_type='z' ,return_loss=False, shiftN=shiftN)['image']
 
         re_output2 = mycrop(output2, w, rand0=reverse_rand1)
         crop_pat2 = mycrop(crop_pat, w, rand0=reverse_rand1)
@@ -467,8 +469,9 @@ class Trainer():
 
         for idx in range(self.args.iter):
             count = idx + self.args.start_iter
-
-            print('..............start step............ ', count, '......learning rate.........', self.optimizerG.param_groups[0]['lr'])
+            
+            if get_rank()==0:
+                print('step ', count, '...learning rate.....', self.optimizerG.param_groups[0]['lr'], 'dk_size', self.args.dk_size)
 
             if count > self.args.iter:
                 print("Done!")
