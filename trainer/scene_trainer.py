@@ -401,9 +401,9 @@ class Trainer():
         rand1 = [random.randint(1,w-1), random.randint(1,w-1)]
 
         shiftN=rand1 if self.args.shiftN else None
-        print('rand1: ', rand1)
+        # print('rand1: ', rand1)
         reverse_rand1 = [w-rand1[0],w-rand1[1]]
-        print('reverse_rand1: ', reverse_rand1)
+        # print('reverse_rand1: ', reverse_rand1)
 
         crop_pat = mycrop(self.data['global_pri'], w, rand0=rand1)
 
@@ -412,38 +412,17 @@ class Trainer():
         re_output2 = mycrop(output2, w, rand0=reverse_rand1)
         crop_pat2 = mycrop(crop_pat, w, rand0=reverse_rand1)
 
-        # rerender if necessary
-        if output2.shape[1] == 5:
-            output1_vgg = output1*0.5+0.5
-            re_output2_vgg = re_output2*0.5+0.5
 
-            light, light_pos, size = set_param('cuda')
+        if get_rank()==0 and count%self.args.save_img_freq==0:
 
-            N = height_to_normal(output1_vgg[:,0:1,:,:])
-            fea = torch.cat((2*N-1,output1_vgg[:,1:4,:,:],output1_vgg[:,4:5,:,:].repeat(1,3,1,1)),dim=1)
-            tex_pos = getTexPos(fea.shape[2], size, 'cuda').unsqueeze(0)
-            rens1 = render(fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
+            self.image_train_saver( output1 , str(count).zfill(6)+'_fea1.png' )
+            self.image_train_saver( re_output2, str(count).zfill(6)+'_fea2.png' )
 
-            N = height_to_normal(re_output2_vgg[:,0:1,:,:])
-            fea = torch.cat((2*N-1,re_output2_vgg[:,1:4,:,:],re_output2_vgg[:,4:5,:,:].repeat(1,3,1,1)),dim=1)
-            # tex_pos = getTexPos(ren_fea.shape[2], size, 'cuda').unsqueeze(0)
-            rens2 = render(fea, tex_pos, light, light_pos, isSpecular=False, no_decay=False) #[0,1]
+            self.image_train_saver( 2*self.data['global_pri']-1, f'{str(count).zfill(6)}_pat0.png' )   
+            self.image_train_saver( 2*crop_pat-1, f'{str(count).zfill(6)}_pat1.png' )   
+            self.image_train_saver( 2*crop_pat2-1, f'{str(count).zfill(6)}_pat2.png' )   
 
-            if get_rank()==0 and count%self.args.save_img_freq==0:
-
-                self.image_train_saver( output1 , str(count).zfill(6)+'_fea1.png' )
-                self.image_train_saver( re_output2, str(count).zfill(6)+'_fea2.png' )
-
-                self.image_train_saver( 2*rens1-1, f'{str(count).zfill(6)}_rens1.png' )   
-                self.image_train_saver( 2*self.data['global_pri']-1, f'{str(count).zfill(6)}_pat0.png' )   
-                self.image_train_saver( 2*crop_pat-1, f'{str(count).zfill(6)}_pat1.png' )   
-                self.image_train_saver( 2*rens2-1, f'{str(count).zfill(6)}_rens2.png' )   
-                self.image_train_saver( 2*crop_pat2-1, f'{str(count).zfill(6)}_pat2.png' )   
-
-            style_loss = self.get_vggnogt_loss(self.preVGG(rens1), self.preVGG(rens2)) * self.args.style_reg_every * self.args.style_regularize
-            # style_fea_loss = self.MSELoss(output1, re_output2) * self.args.style_reg_every * self.args.style_regularize
-
-            # style_loss = (style_ren_loss+style_fea_loss)*0.5
+        style_loss = self.MSELoss(output1, re_output2) * self.args.style_reg_every * self.args.style_regularize
 
         self.loss_dict['style_loss'] = style_loss.item()
 
@@ -469,7 +448,7 @@ class Trainer():
 
         for idx in range(self.args.iter):
             count = idx + self.args.start_iter
-            
+
             if get_rank()==0:
                 print('step ', count, '...learning rate.....', self.optimizerG.param_groups[0]['lr'], 'dk_size', self.args.dk_size)
 

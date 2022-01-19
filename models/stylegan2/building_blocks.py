@@ -140,7 +140,7 @@ class EqualConv2d(nn.Module):
         self.padding = padding
 
         # adjust padding for kernel size 4
-        if kernel_size==4:
+        if kernel_size==4 and self.downsample:
             self.padding = int(padding/2)
 
         if bias:
@@ -365,6 +365,46 @@ class NoiseInjection(nn.Module):
         super().__init__()
         self.weight = nn.Parameter(torch.zeros(1))
 
+
+    def __shift_noise(self, noise, shiftN):
+
+        scale = 512/noise.shape[-1]
+
+        shiftY = shiftN[0]
+        shiftX = shiftN[1]
+
+        scaled_shiftX = shiftX/scale
+        scaled_shiftY = shiftY/scale
+
+        scaled_shiftX_int = int(np.modf(scaled_shiftX)[1])
+        scaled_shiftX_frac = np.modf(scaled_shiftX)[0]
+        scaled_shiftY_int = int(np.modf(scaled_shiftY)[1])
+        scaled_shiftY_frac = np.modf(scaled_shiftY)[0]
+        
+        print('X ', scaled_shiftX_int, scaled_shiftX_frac, 'Y ',scaled_shiftY_int, scaled_shiftY_frac)
+
+        # shift the interger part
+        noise_crop = mycrop(noise, noise.shape[-1], rand0=[scaled_shiftY_int, scaled_shiftX_int])
+        size = noise_crop.shape[-1]
+
+        # dealing with subpixel
+        input = F.pad(noise_crop, (1,1,1,1), mode='circular')
+
+        # print('noise shape：', noise.shape)
+        scaled_shiftX_frac = scaled_shiftX_frac*2/(size+1)
+        scaled_shiftY_frac = scaled_shiftY_frac*2/(size+1)
+
+        dX = torch.linspace(-1+2/(size+1)+scaled_shiftX_frac, 1-2/(size+1)+scaled_shiftX_frac, size)
+        dY = torch.linspace(-1+2/(size+1)+scaled_shiftY_frac, 1-2/(size+1)+scaled_shiftY_frac, size)
+
+        meshx, meshy = torch.meshgrid((dY, dX))
+        grid = torch.stack((meshy, meshx), 2)
+        grid = grid.unsqueeze(0).cuda() # add batch dim
+
+        output = torch.nn.functional.grid_sample(input, grid, align_corners=True)
+
+        return output
+
     def forward(self, image, noise=None, shiftN=None):
 
         if noise is None:
@@ -373,43 +413,7 @@ class NoiseInjection(nn.Module):
 
         # shift noise if needed
         if shiftN is not None:
-
-            size = noise.shape[-1]
-
-            shiftX = shiftN[0]
-            shiftY = shiftN[1]
-
-            scaled_shiftX = shiftX/noise.shape[-1]
-            scaled_shiftY = shiftY/noise.shape[-1]
-
-            scaled_shiftX_int = int(np.modf(scaled_shiftX)[1])
-            scaled_shiftX_frac = np.modf(scaled_shiftX)[0]
-            scaled_shiftY_int = int(np.modf(scaled_shiftY)[1])
-            scaled_shiftY_frac = np.modf(scaled_shiftY)[0]
-
-            # shift the interger part
-            noise = mycrop(noise, size, rand0=[scaled_shiftX_int, scaled_shiftY_int])
-
-            # dealing with subpixel
-            noise = F.pad(noise, (1,1,1,1), mode='circular')
-
-            # print('noise shape：', noise.shape)
-            scaled_shiftX_frac = scaled_shiftX_frac*2/(size+1)
-            scaled_shiftY_frac = scaled_shiftY_frac*2/(size+1)
-
-            dX = torch.linspace(-1+2/(size+1)-shiftY, 1-2/(size+1)-shiftY, size)
-            dY = torch.linspace(-1+2/(size+1)-shiftX, 1-2/(size+1)-shiftX, size)
-
-            meshx, meshy = torch.meshgrid((dX, dY))
-            grid = torch.stack((meshy, meshx), 2)
-            grid = grid.unsqueeze(0).cuda() # add batch dim
-
-
-            noise = torch.nn.functional.grid_sample(noise, grid, align_corners=True)
-
-            # print('shifted noise shape：', noise.shape)
-
-
+            noise = self.__shift_noise(noise, shiftN)
 
         return image + self.weight * noise
 
