@@ -418,9 +418,9 @@ class Trainer():
             self.image_train_saver( output1 , str(count).zfill(6)+'_fea1.png' )
             self.image_train_saver( re_output2, str(count).zfill(6)+'_fea2.png' )
 
-            self.image_train_saver( 2*self.data['global_pri']-1, f'{str(count).zfill(6)}_pat0.png' )   
-            self.image_train_saver( 2*crop_pat-1, f'{str(count).zfill(6)}_pat1.png' )   
-            self.image_train_saver( 2*crop_pat2-1, f'{str(count).zfill(6)}_pat2.png' )   
+            self.image_train_saver( self.data['global_pri'], f'{str(count).zfill(6)}_pat0.png', gamma=True if self.args.color_cond else False  )   
+            self.image_train_saver( crop_pat, f'{str(count).zfill(6)}_pat1.png' , gamma=True if self.args.color_cond else False )   
+            self.image_train_saver( crop_pat2, f'{str(count).zfill(6)}_pat2.png', gamma=True if self.args.color_cond else False  )   
 
         style_loss = self.MSELoss(output1, re_output2) * self.args.style_reg_every * self.args.style_regularize
 
@@ -430,7 +430,28 @@ class Trainer():
         style_loss.backward()
         self.optimizerG.step()
    
-    
+
+    def regularize_color(self, count):
+
+        output = self.generator(self.data['global_pri'] ,return_loss=False )['image']
+        output1 = self.generator(self.data['global_pri'] ,return_loss=False )['image']
+
+        if get_rank()==0 and count%self.args.save_img_freq==0:
+
+            self.image_train_saver( output1 , str(count).zfill(6)+'_colorfea1.png' )
+            self.image_train_saver( output, str(count).zfill(6)+'_colorfea2.png' )
+
+            self.image_train_saver( self.data['global_pri'], f'{str(count).zfill(6)}_colorpat0.png', gamma=True if self.args.color_cond else False  )   
+  
+        color_loss = -self.MSELoss(output1, output) * self.args.color_reg_every * self.args.color_regularize
+
+        self.loss_dict['color_loss'] = color_loss.item()
+
+        self.optimizerG.zero_grad()
+        color_loss.backward()
+        self.optimizerG.step()
+   
+        
    
     def train(self):
         "Note that in dist training printed and saved losses are not reduced, but from the first process"
@@ -498,6 +519,9 @@ class Trainer():
                 self.regularizeVGG(count, rand0)
             if self.args.style_reg_every != 0 and count % self.args.style_reg_every == 0 and self.args.style_regularize!=0:
                 self.regularize_style(count)
+            if self.args.color_reg_every != 0 and count % self.args.color_reg_every == 0 and self.args.color_regularize!=0 and self.args.color_cond:
+                self.regularize_color(count)
+
 
 
             accum = 0.5 ** (32 / (10 * 1000))

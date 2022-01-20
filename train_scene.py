@@ -38,6 +38,7 @@ if __name__ == "__main__":
     parser.add_argument("--path_regularize", type=float, default=2, help='loss weight for path regularization')
     parser.add_argument("--vgg_regularize", type=float, default=1, help='loss weight for vgg regularization')
     parser.add_argument("--style_regularize", type=float, default=1, help='loss weight for style regularization')
+    parser.add_argument("--color_regularize", type=float, default=0, help='loss weight for color regularization')
    
     # Training related
     parser.add_argument("--local_rank", type=int, default=0)
@@ -56,6 +57,7 @@ if __name__ == "__main__":
     parser.add_argument("--g_reg_every", type=int, default=4, help='perform path regularization for every how many steps')
     parser.add_argument("--vgg_reg_every", type=int, default=4, help='perform vgg regularization for every how many steps, if 0 then no vgg loss')
     parser.add_argument("--style_reg_every", type=int, default=4, help='perform style regularization for every how many steps, if 0 then no vgg loss')
+    parser.add_argument("--color_reg_every", type=int, default=4, help='perform color regularization for every how many steps, if 0 then no vgg loss')
     parser.add_argument("--vgg_fix_noise", type=bool, default=True, help='noise will be fixed when perform vgg loss')
     parser.add_argument('--aug_data', action='store_true', help='data augmentation')        
     parser.add_argument('--extract_model', action='store_true', help='extract model of tileable patterns from target images')        
