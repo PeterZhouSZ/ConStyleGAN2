@@ -23,6 +23,7 @@ if __name__ == "__main__":
     parser.add_argument("--random_flip", type=bool, default=True, help='if random_flip or not')
     parser.add_argument("--random_crop", type=bool, default=False, help='if random_crop or not')
     parser.add_argument("--shuffle", type=bool, default=True, help='used in dataloader')
+    parser.add_argument("--dataset", type=str, default='Tile', help='which dataset we use')
 
     # Generator related 
     parser.add_argument("--style_dim", type=int, default=512)

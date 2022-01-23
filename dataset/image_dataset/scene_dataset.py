@@ -23,7 +23,13 @@ class Dataset(torch.utils.data.Dataset):
             
         # prepare datasourcer  
         if datasets is None:
-            datasets = SceneConfig.TRAIN_DATASETS if train else SceneConfig.TEST_DATASETS
+            if args.dataset=='Tile':
+                datasets = SceneConfig.TRAIN_DATASETS_TILE if train else SceneConfig.TEST_DATASETS_TILE
+            elif args.dataset=='Ground':
+                datasets = SceneConfig.TRAIN_DATASETS_GROUND if train else SceneConfig.TEST_DATASETS_GROUND
+            elif args.dataset=='Leather':
+                datasets = SceneConfig.TRAIN_DATASETS_LEATHER if train else SceneConfig.TEST_DATASETS_LEATHER
+
         paths_list = []
         for dataset in datasets:
             paths_list.append( get_path( dataset, train=train ) )

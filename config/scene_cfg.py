@@ -44,8 +44,14 @@ PATH_TO_DATASET:
 
 
 class SceneConfig():
-    TRAIN_DATASETS = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/BricksDataset_pat2_train_color']
-    TEST_DATASETS = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/BricksDataset_pat2_val_color']
+    TRAIN_DATASETS_TILE = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/BricksDataset_pat2_train_color']
+    TEST_DATASETS_TILE = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/BricksDataset_pat2_val_color']
+
+    TRAIN_DATASETS_GROUND = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/GroundDataset_pat_train']
+    TEST_DATASETS_GROUND = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/GroundDataset_pat_val']
+
+    TRAIN_DATASETS_LEATHER = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/LeatherDataset_pat_train']
+    TEST_DATASETS_LEATHER = ['/home/grads/z/zhouxilong199213/Projects/Adobe_2021S/Dataset/LeatherDataset_pat_val']
 
     # TRAIN_DATASETS = ['/home/code-base/scratch_space/Server/data/ade_bedroom']
     # TEST_DATASETS = ['/home/code-base/scratch_space/Server/data/ade_bedroom'] 

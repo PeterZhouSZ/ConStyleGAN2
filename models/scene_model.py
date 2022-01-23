@@ -203,8 +203,8 @@ class Generator(nn.Module):
         latent = self.__prepare_letent(styles, inject_index, truncation, truncation_latent, input_type)
         noise = self.__prepare_noise(noise, randomize_noise)
         
-        if noise[0] is not None:
-            print('noise ', noise[0][0,0,5,5])
+        # if noise[0] is not None:
+        #     print('noise ', noise[0][0,0,5,5])
         # else:
         #     print('noise is none')
         # # # start generating # # #  
